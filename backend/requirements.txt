@@ -1,0 +1,39 @@
+# --- Núcleo web ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.20
+
+# --- Banco ---
+sqlalchemy==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0          # driver PostgreSQL (produção)
+aiosqlite==0.20.0        # driver SQLite (dev/testes)
+greenlet==3.1.1
+
+# --- Integrações HTTP ---
+httpx==0.28.1
+tenacity==9.0.0
+
+# --- Fila / cache / pub-sub ---
+redis==5.2.1
+arq==0.26.3
+
+# --- Segurança ---
+cryptography==44.0.0     # cofre de tokens (Fernet)
+pyjwt==2.10.1
+bcrypt==4.2.1
+pyotp==2.9.0             # MFA TOTP
+
+# --- Observabilidade ---
+structlog==24.4.0
+prometheus-client==0.21.1
+
+# --- Exportação de relatórios ---
+openpyxl==3.1.5
+
+# --- Testes ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+respx==0.22.0            # mock de HTTP para testes de conector

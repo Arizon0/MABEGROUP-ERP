@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Banco local / arquivos gerados
+*.db
+*.sqlite3
+exports/
+uploads/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Segredos — nunca versionar
+.env
+.env.*
+!.env.example
+
+# Editores / SO
+.DS_Store
+.idea/
+.vscode/
