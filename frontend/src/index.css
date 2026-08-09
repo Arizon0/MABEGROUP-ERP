@@ -1,0 +1,199 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Paleta validada com o script de checagem da skill de visualização de dados
+ * (bandas de luminosidade, piso de croma, separação para daltonismo e
+ * contraste), em modo claro e escuro. Os três primeiros slots categóricos
+ * passam em todos os pares nos dois modos — por isso o painel limita as séries
+ * categóricas a três (os três marketplaces) em vez de gerar cores novas.
+ */
+:root {
+  color-scheme: light;
+
+  --surface-0: #f4f3f0;
+  --surface-1: #fcfcfb;
+  --surface-2: #ffffff;
+  --border: #e2e1dc;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #86857f;
+
+  /* Categóricas — ordem fixa, nunca ciclada. */
+  --series-1: #2a78d6; /* azul    — Mercado Livre */
+  --series-2: #eb6834; /* laranja — Shopee */
+  --series-3: #1baf7a; /* aqua    — Mercado Pago */
+
+  /* Divergente (polaridade da cascata financeira): azul ↔ vermelho. */
+  --diverge-pos: #2a78d6;
+  --diverge-neg: #e34948;
+  --diverge-mid: #f0efec;
+
+  /* Estado — reservadas, sempre acompanhadas de rótulo ou ícone. */
+  --status-good: #007a4d;
+  --status-warning: #b26a00;
+  --status-critical: #c0392b;
+
+  --grid: #ebeae5;
+
+  /* Variantes suaves: o modificador de opacidade do Tailwind não se aplica a
+     valores em `var()`, então cada tom derivado é um token explícito. */
+  --brand-soft: color-mix(in srgb, var(--series-1) 12%, transparent);
+  --brand-line: color-mix(in srgb, var(--series-1) 34%, transparent);
+  --brand-ring: color-mix(in srgb, var(--series-1) 42%, transparent);
+  --good-soft: color-mix(in srgb, var(--status-good) 12%, transparent);
+  --good-line: color-mix(in srgb, var(--status-good) 34%, transparent);
+  --warn-soft: color-mix(in srgb, var(--status-warning) 12%, transparent);
+  --warn-line: color-mix(in srgb, var(--status-warning) 34%, transparent);
+  --bad-soft: color-mix(in srgb, var(--status-critical) 12%, transparent);
+  --bad-line: color-mix(in srgb, var(--status-critical) 34%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border: #34342f;
+
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8d8c83;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --diverge-pos: #3987e5;
+    --diverge-neg: #e66767;
+    --diverge-mid: #383835;
+
+    --status-good: #3fa06d;
+    --status-warning: #d99b3d;
+    --status-critical: #e66767;
+
+    --grid: #2c2c29;
+
+    /* Variantes suaves: o modificador de opacidade do Tailwind não se aplica a
+       valores em `var()`, então cada tom derivado é um token explícito. */
+    --brand-soft: color-mix(in srgb, var(--series-1) 12%, transparent);
+    --brand-line: color-mix(in srgb, var(--series-1) 34%, transparent);
+    --brand-ring: color-mix(in srgb, var(--series-1) 42%, transparent);
+    --good-soft: color-mix(in srgb, var(--status-good) 12%, transparent);
+    --good-line: color-mix(in srgb, var(--status-good) 34%, transparent);
+    --warn-soft: color-mix(in srgb, var(--status-warning) 12%, transparent);
+    --warn-line: color-mix(in srgb, var(--status-warning) 34%, transparent);
+    --bad-soft: color-mix(in srgb, var(--status-critical) 12%, transparent);
+    --bad-line: color-mix(in srgb, var(--status-critical) 34%, transparent);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --border: #34342f;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8d8c83;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+
+  --diverge-pos: #3987e5;
+  --diverge-neg: #e66767;
+  --diverge-mid: #383835;
+
+  --status-good: #3fa06d;
+  --status-warning: #d99b3d;
+  --status-critical: #e66767;
+
+  --grid: #2c2c29;
+
+  /* Variantes suaves: o modificador de opacidade do Tailwind não se aplica a
+     valores em `var()`, então cada tom derivado é um token explícito. */
+  --brand-soft: color-mix(in srgb, var(--series-1) 12%, transparent);
+  --brand-line: color-mix(in srgb, var(--series-1) 34%, transparent);
+  --brand-ring: color-mix(in srgb, var(--series-1) 42%, transparent);
+  --good-soft: color-mix(in srgb, var(--status-good) 12%, transparent);
+  --good-line: color-mix(in srgb, var(--status-good) 34%, transparent);
+  --warn-soft: color-mix(in srgb, var(--status-warning) 12%, transparent);
+  --warn-line: color-mix(in srgb, var(--status-warning) 34%, transparent);
+  --bad-soft: color-mix(in srgb, var(--status-critical) 12%, transparent);
+  --bad-line: color-mix(in srgb, var(--status-critical) 34%, transparent);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-line bg-surface p-4;
+  }
+  .card-title {
+    @apply text-sm font-semibold text-ink;
+  }
+  .card-sub {
+    @apply text-xs text-ink-muted;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg border border-line px-3 py-1.5
+           text-sm font-medium text-ink transition hover:bg-surface-raised
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-transparent bg-brand text-white hover:opacity-90;
+  }
+  .input {
+    @apply rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink
+           outline-none focus:ring-2 focus:ring-[var(--brand-ring)];
+  }
+  .th {
+    @apply whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase
+           tracking-wide text-ink-muted;
+  }
+  .td {
+    @apply whitespace-nowrap px-3 py-2 text-sm text-ink;
+  }
+  .num {
+    @apply font-mono tabular-nums;
+  }
+}
+
+/* Entrada de item novo no feed ao vivo: destaque breve e discreto, sem
+   movimento que atrapalhe a leitura de quem está acompanhando a lista. */
+@keyframes destacar {
+  from {
+    background-color: color-mix(in srgb, var(--series-1) 18%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.destacar {
+  animation: destacar 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .destacar,
+  .animate-pulse {
+    animation: none;
+  }
+}
