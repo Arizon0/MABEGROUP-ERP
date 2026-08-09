@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     DateTime,
     ForeignKey,
     Index,
@@ -17,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 
 
 class Campaign(Base, TimestampMixin):
@@ -35,9 +34,9 @@ class Campaign(Base, TimestampMixin):
         Index("ix_camp_tenant_periodo", "tenant_id", "start_at", "end_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(80), nullable=False)
     name: Mapped[str] = mapped_column(String(200), default="")
@@ -63,13 +62,13 @@ class CampaignItem(Base):
         Index("ix_camp_item_anuncio", "listing_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     campaign_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False
     )
     listing_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
     )
     external_listing_id: Mapped[str] = mapped_column(String(64), default="")
     original_price: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)

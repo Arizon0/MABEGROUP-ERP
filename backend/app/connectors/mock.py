@@ -81,6 +81,11 @@ class ConectorMock:
     def __init__(self, canal: str = Canal.MERCADO_LIVRE, semente: int = 42) -> None:
         self.channel = canal
         self._semente = semente
+        # Registro dos pagamentos emitidos junto de cada pedido gerado. Sem ele,
+        # `fetch_payment` devolveria um valor aleatório desvinculado do pedido —
+        # e o painel exibiria líquido maior que o bruto, que é justamente o tipo
+        # de número impossível que uma demonstração não pode mostrar.
+        self._pagamentos: dict[str, CanonicalPayment] = {}
 
     def _rnd(self, sufixo: str = "") -> random.Random:
         return random.Random(f"{self.channel}:{self._semente}:{sufixo}")
@@ -208,6 +213,32 @@ class ConectorMock:
             if self.channel == Canal.MERCADO_LIVRE
             else f"26{rnd.randint(10**10, 10**11)}"
         )
+        # Na Shopee o escrow é buscado pelo número do pedido; no Mercado Livre o
+        # pagamento tem identificador próprio.
+        eh_shopee = self.channel == Canal.SHOPEE
+        id_pagamento = externo if eh_shopee else str(rnd.randint(10**10, 10**11))
+
+        # Pagamento coerente com este pedido: mesmos valores, mesmas taxas.
+        liberado = status in (StatusPedido.ENTREGUE, StatusPedido.ENVIADO) and not cancelado
+        self._pagamentos[id_pagamento] = CanonicalPayment(
+            external_id=id_pagamento,
+            channel=self.channel,
+            provider=Canal.MERCADO_PAGO if self.channel != Canal.SHOPEE else "shopee_escrow",
+            status=StatusPagamento.CANCELADO if cancelado else StatusPagamento.APROVADO,
+            external_order_id=externo,
+            payment_method=rnd.choice(["credit_card", "pix", "boleto"]),
+            installments=rnd.choices([1, 2, 3, 6, 10], weights=[55, 12, 12, 13, 8])[0],
+            transaction_amount=bruto,
+            total_paid_amount=bruto,
+            net_received_amount=liquido if not cancelado else Decimal("0"),
+            fees=[
+                CanonicalFee(fee_type=TipoTaxa.COMISSAO_MARKETPLACE, amount=comissao),
+                CanonicalFee(fee_type=TipoTaxa.TAXA_PAGAMENTO, amount=taxa_pagamento),
+            ],
+            date_approved=criado.replace(tzinfo=UTC),
+            money_release_date=criado.replace(tzinfo=UTC) + timedelta(days=14),
+            money_release_status="released" if liberado else "pending",
+        )
 
         return CanonicalOrder(
             external_id=externo,
@@ -230,7 +261,9 @@ class ConectorMock:
             ship_city=rnd.choice(CIDADES[estado]),
             logistic_type=logistica,
             external_shipment_id=str(rnd.randint(10**10, 10**11)),
-            external_payment_ids=[str(rnd.randint(10**10, 10**11))],
+            # A Shopee não expõe identificador de pagamento no pedido: o valor
+            # vem do escrow, consultado pelo próprio número do pedido.
+            external_payment_ids=[] if eh_shopee else [id_pagamento],
             raw={"mock": True},
         )
 
@@ -258,6 +291,11 @@ class ConectorMock:
         )
 
     async def fetch_payment(self, _token: str, external_id: str, **_: Any) -> CanonicalPayment:
+        # Pagamento emitido junto do pedido, quando conhecido.
+        registrado = self._pagamentos.get(external_id)
+        if registrado is not None:
+            return registrado
+
         rnd = self._rnd(f"pgto:{external_id}")
         valor = Decimal(str(rnd.uniform(40, 320))).quantize(Decimal("0.01"))
         taxa = (valor * Decimal("0.0499")).quantize(Decimal("0.01"))

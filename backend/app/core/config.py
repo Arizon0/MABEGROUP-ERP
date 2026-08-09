@@ -89,7 +89,7 @@ class Settings(BaseSettings):
 
     # --- Seed inicial --------------------------------------------------------
     SEED_ON_STARTUP: bool = True
-    ADMIN_EMAIL: str = "admin@marketplacehub.local"
+    ADMIN_EMAIL: str = "admin@marketplacehub.com.br"
     ADMIN_PASSWORD: str = "admin123"
     ADMIN_TENANT: str = "Demonstração"
 

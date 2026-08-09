@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -18,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 
 
 class Product(Base, TimestampMixin):
@@ -33,9 +32,9 @@ class Product(Base, TimestampMixin):
     __tablename__ = "products"
     __table_args__ = (UniqueConstraint("tenant_id", "sku", name="uq_produto_tenant_sku"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        BigPK, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     sku: Mapped[str] = mapped_column(String(80), nullable=False)
     name: Mapped[str] = mapped_column(String(300), default="")
@@ -59,15 +58,15 @@ class Listing(Base, TimestampMixin):
         Index("ix_anuncio_tenant_status", "tenant_id", "status"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     channel_account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
     )
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(64), nullable=False)
     product_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("products.id", ondelete="SET NULL"), nullable=True
     )
 
     title: Mapped[str] = mapped_column(String(300), default="")
@@ -98,10 +97,10 @@ class ListingVariation(Base, TimestampMixin):
         UniqueConstraint("listing_id", "external_variation_id", name="uq_variacao_anuncio"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     listing_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
     )
     external_variation_id: Mapped[str] = mapped_column(String(64), nullable=False)
     sku_channel: Mapped[str] = mapped_column(String(80), default="")
@@ -126,15 +125,15 @@ class SkuLink(Base, TimestampMixin):
         UniqueConstraint("tenant_id", "channel", "sku_channel", name="uq_depara_tenant_canal_sku"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     sku_channel: Mapped[str] = mapped_column(String(80), nullable=False)
     product_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("products.id", ondelete="CASCADE"), nullable=False
     )
     confidence: Mapped[str] = mapped_column(String(20), default="manual")
-    created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(BigPK, nullable=True)
 
 
 class SkuPendency(Base, TimestampMixin):
@@ -150,8 +149,8 @@ class SkuPendency(Base, TimestampMixin):
         UniqueConstraint("tenant_id", "channel", "sku_channel", name="uq_pendencia_tenant_canal_sku"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     sku_channel: Mapped[str] = mapped_column(String(80), nullable=False)
     sample_title: Mapped[str] = mapped_column(String(300), default="")
@@ -170,12 +169,12 @@ class InventorySnapshot(Base):
     __tablename__ = "inventory_snapshots"
     __table_args__ = (Index("ix_estoque_anuncio_data", "listing_id", "captured_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     listing_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("listings.id", ondelete="CASCADE"), nullable=False
     )
-    variation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    variation_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
     available: Mapped[int] = mapped_column(Integer, default=0)
     reserved: Mapped[int] = mapped_column(Integer, default=0)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -6,7 +6,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -20,7 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 from app.models.enums import StatusConta, StatusWebhook
 
 
@@ -39,9 +38,9 @@ class ChannelAccount(Base, TimestampMixin):
         Index("ix_contas_tenant_canal", "tenant_id", "channel"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        BigPK, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_account_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -70,9 +69,9 @@ class ChannelCredential(Base, TimestampMixin):
     __tablename__ = "channel_credentials"
     __table_args__ = (Index("ix_cred_conta_atual", "channel_account_id", "is_current"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     channel_account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
     )
     access_token_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     refresh_token_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
@@ -95,9 +94,9 @@ class OAuthState(Base, TimestampMixin):
 
     __tablename__ = "oauth_states"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     state: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     code_verifier_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     redirect_after: Mapped[str] = mapped_column(String(500), default="")
@@ -119,9 +118,9 @@ class SyncCursor(Base, TimestampMixin):
         UniqueConstraint("channel_account_id", "resource", name="uq_cursor_conta_recurso"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     channel_account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
     )
     resource: Mapped[str] = mapped_column(String(40), nullable=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -149,10 +148,10 @@ class WebhookEvent(Base):
         Index("ix_webhook_conta", "channel_account_id", "received_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
-    channel_account_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    tenant_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    channel_account_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
     topic: Mapped[str] = mapped_column(String(60), default="")
     resource: Mapped[str] = mapped_column(String(255), default="")
     external_event_id: Mapped[str] = mapped_column(String(128), default="")
@@ -176,9 +175,9 @@ class IntegrationLog(Base):
     __tablename__ = "integration_logs"
     __table_args__ = (Index("ix_intlog_canal_data", "channel", "created_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    channel_account_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
+    channel_account_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     method: Mapped[str] = mapped_column(String(10), default="GET")
     endpoint: Mapped[str] = mapped_column(String(255), default="")

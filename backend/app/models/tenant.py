@@ -6,7 +6,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -16,7 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 from app.models.enums import PapelUsuario
 
 
@@ -25,7 +24,7 @@ class Tenant(Base, TimestampMixin):
 
     __tablename__ = "tenants"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(60), unique=True, nullable=False)
     plan: Mapped[str] = mapped_column(String(30), default="trial", nullable=False)
@@ -42,9 +41,9 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        BigPK, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -62,9 +61,9 @@ class UserSession(Base, TimestampMixin):
 
     __tablename__ = "user_sessions"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        BigPK, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -87,9 +86,9 @@ class AuditLog(Base):
         Index("ix_audit_entidade", "entity_type", "entity_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(60), default="")
     entity_id: Mapped[str] = mapped_column(String(64), default="")

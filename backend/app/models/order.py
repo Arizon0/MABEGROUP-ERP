@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -19,7 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 from app.models.enums import FonteLiquido, StatusPedido
 
 
@@ -36,12 +35,12 @@ class Order(Base, TimestampMixin):
         Index("ix_orders_pack", "external_pack_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        BigPK, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     channel_account_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("channel_accounts.id", ondelete="CASCADE"), nullable=False
     )
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -114,20 +113,20 @@ class OrderItem(Base, TimestampMixin):
         Index("ix_item_produto", "product_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     order_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
     )
     external_item_id: Mapped[str] = mapped_column(String(64), default="")
     listing_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
     )
     variation_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("listing_variations.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("listing_variations.id", ondelete="SET NULL"), nullable=True
     )
     product_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("products.id", ondelete="SET NULL"), nullable=True
     )
     sku_channel: Mapped[str] = mapped_column(String(80), default="")
     sku_base: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -155,10 +154,10 @@ class OrderEvent(Base):
     __tablename__ = "order_events"
     __table_args__ = (Index("ix_evento_pedido_data", "order_id", "occurred_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     order_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
     )
     event_type: Mapped[str] = mapped_column(String(60), nullable=False)
     from_status: Mapped[str] = mapped_column(String(30), default="")
@@ -181,11 +180,11 @@ class Shipment(Base, TimestampMixin):
         Index("ix_envio_atraso", "tenant_id", "estimated_delivery"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     order_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), nullable=True
+        BigPK, ForeignKey("orders.id", ondelete="CASCADE"), nullable=True
     )
     external_id: Mapped[str] = mapped_column(String(64), nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -225,10 +224,10 @@ class ShipmentEvent(Base):
     __tablename__ = "shipment_events"
     __table_args__ = (Index("ix_evento_envio_data", "shipment_id", "occurred_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     shipment_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("shipments.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("shipments.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(40), default="")
     substatus: Mapped[str] = mapped_column(String(60), default="")

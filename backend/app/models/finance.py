@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -20,7 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 from app.models.enums import StatusConciliacao, StatusPagamento
 
 
@@ -40,11 +39,11 @@ class Payment(Base, TimestampMixin):
         Index("ix_pgto_liberacao", "tenant_id", "money_release_date"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     order_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
     external_id: Mapped[str] = mapped_column(String(64), nullable=False)
     provider: Mapped[str] = mapped_column(String(20), nullable=False)  # mercadopago|shopee_escrow
@@ -94,10 +93,10 @@ class PaymentFee(Base):
     __tablename__ = "payment_fees"
     __table_args__ = (Index("ix_taxa_pgto", "payment_id"), Index("ix_taxa_tipo", "tenant_id", "fee_type"))
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     payment_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False
     )
     fee_type: Mapped[str] = mapped_column(String(40), nullable=False)
     fee_type_raw: Mapped[str] = mapped_column(String(60), default="")
@@ -113,10 +112,10 @@ class Refund(Base, TimestampMixin):
     __tablename__ = "refunds"
     __table_args__ = (Index("ix_reemb_tenant_data", "tenant_id", "date_created"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     payment_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False
     )
     external_id: Mapped[str] = mapped_column(String(64), default="")
     amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
@@ -139,9 +138,9 @@ class Settlement(Base, TimestampMixin):
         Index("ix_repasse_tenant_data", "tenant_id", "settlement_date"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(80), nullable=False)
     settlement_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -171,16 +170,16 @@ class SettlementEntry(Base):
         Index("ix_linha_pgto", "payment_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     settlement_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("settlements.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("settlements.id", ondelete="CASCADE"), nullable=False
     )
     payment_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("payments.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("payments.id", ondelete="SET NULL"), nullable=True
     )
     order_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
     entry_type: Mapped[str] = mapped_column(String(40), default="sale")
     amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
@@ -202,10 +201,10 @@ class Reconciliation(Base, TimestampMixin):
         Index("ix_concil_tenant_status", "tenant_id", "status"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     order_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
     )
     expected_net: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
     settled_net: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)

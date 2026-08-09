@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -19,7 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 
 
 class Question(Base, TimestampMixin):
@@ -35,13 +34,13 @@ class Question(Base, TimestampMixin):
         Index("ix_pergunta_tenant_status", "tenant_id", "status", "date_created"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(64), nullable=False)
     listing_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
     )
     external_listing_id: Mapped[str] = mapped_column(String(64), default="")
     text: Mapped[str] = mapped_column(Text, default="")
@@ -67,13 +66,13 @@ class Message(Base, TimestampMixin):
         Index("ix_msg_tenant_data", "tenant_id", "sent_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(80), nullable=False)
     order_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
     pack_id: Mapped[str] = mapped_column(String(64), default="")
     from_role: Mapped[str] = mapped_column(String(20), default="buyer")  # buyer|seller
@@ -92,13 +91,13 @@ class Claim(Base, TimestampMixin):
         Index("ix_recl_tenant_status", "tenant_id", "status", "opened_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(64), nullable=False)
     order_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
     type: Mapped[str] = mapped_column(String(30), default="claim")
     stage: Mapped[str] = mapped_column(String(40), default="")
@@ -122,10 +121,10 @@ class ClaimEvent(Base):
     __tablename__ = "claim_events"
     __table_args__ = (Index("ix_evento_recl_data", "claim_id", "occurred_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     claim_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False
+        BigPK, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False
     )
     event_type: Mapped[str] = mapped_column(String(60), default="")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -144,16 +143,16 @@ class Review(Base, TimestampMixin):
         Index("ix_aval_tenant_data", "tenant_id", "date_created"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
     external_id: Mapped[str] = mapped_column(String(80), nullable=False)
     listing_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("listings.id", ondelete="SET NULL"), nullable=True
     )
     order_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+        BigPK, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
     rating: Mapped[int] = mapped_column(Integer, default=0)
     title: Mapped[str] = mapped_column(String(200), default="")

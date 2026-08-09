@@ -12,7 +12,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    BigInteger,
     Date,
     DateTime,
     Index,
@@ -22,7 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import BigPK, Base, TimestampMixin
 
 
 class MetricHourly(Base, TimestampMixin):
@@ -30,16 +29,23 @@ class MetricHourly(Base, TimestampMixin):
 
     __tablename__ = "metrics_hourly"
     __table_args__ = (
+        # O canal faz parte da chave natural: o rollup mantém uma linha por
+        # marketplace em cada hora, e sem ele dois canais no mesmo bucket
+        # colidiriam.
         UniqueConstraint(
-            "tenant_id", "channel_account_id", "bucket", name="uq_metrica_hora_conta_bucket"
+            "tenant_id",
+            "channel_account_id",
+            "channel",
+            "bucket",
+            name="uq_metrica_hora_conta_canal_bucket",
         ),
         Index("ix_metrica_hora_tenant", "tenant_id", "bucket"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     #: 0 = consolidado de todas as contas do tenant; > 0 = conta específica.
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, default=0, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), default="")
     bucket: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -64,9 +70,9 @@ class MetricDaily(Base, TimestampMixin):
         Index("ix_metrica_dia_tenant", "tenant_id", "day"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, default=0, nullable=False)
     channel: Mapped[str] = mapped_column(String(20), default="")
     day: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -99,9 +105,9 @@ class MetricSnapshot(Base):
         Index("ix_snapshot_tenant_dia", "tenant_id", "day"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    channel_account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    channel_account_id: Mapped[int] = mapped_column(BigPK, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     metric: Mapped[str] = mapped_column(String(60), nullable=False)
     value_num: Mapped[Decimal | None] = mapped_column(nullable=True)
@@ -115,8 +121,8 @@ class AlertRule(Base, TimestampMixin):
 
     __tablename__ = "alert_rules"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     #: stock_out | divergence | sales_drop | unanswered_question | sync_lag
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -134,9 +140,9 @@ class Alert(Base):
     __tablename__ = "alerts"
     __table_args__ = (Index("ix_alerta_tenant_data", "tenant_id", "created_at"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    rule_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    rule_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     severity: Mapped[str] = mapped_column(String(20), default="info")
     title: Mapped[str] = mapped_column(String(200), nullable=False)

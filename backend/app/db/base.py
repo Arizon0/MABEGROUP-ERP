@@ -4,7 +4,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, MetaData, Numeric, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    Numeric,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 # Escala monetária: 4 casas no armazenamento, 2 na apresentação. As 2 casas
@@ -12,6 +21,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 # sem acumular erro de arredondamento no meio da cadeia de cálculo.
 Money = Numeric(18, 4, asdecimal=True)
 ZERO = Decimal("0")
+
+# Chave primária de 64 bits. O SQLite só auto-incrementa a coluna quando o tipo
+# declarado é exatamente ``INTEGER`` — um ``BIGINT PRIMARY KEY`` ali vira uma
+# coluna comum e todo INSERT falha por NOT NULL. A variante mantém BIGINT no
+# PostgreSQL (produção) e INTEGER no SQLite (desenvolvimento e testes).
+BigPK = BigInteger().with_variant(Integer, "sqlite")
 
 
 #: Nomear constraints é o que permite ao Alembic gerar migrations reversíveis:
@@ -55,7 +70,7 @@ class TenantMixin:
     @declared_attr
     def tenant_id(cls) -> Mapped[int]:  # noqa: N805
         return mapped_column(
-            BigInteger().with_variant(BigInteger, "postgresql"),
+            BigPK,
             ForeignKey("tenants.id", ondelete="CASCADE"),
             nullable=False,
             index=True,
