@@ -66,7 +66,16 @@ class Order(Base, TimestampMixin):
     payment_fee: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
     refund_amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Imposto **retido na fonte pelo canal**, quando informado pela API. Reduz
+    #: o que o vendedor recebe, por isso entra no líquido.
     tax_amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Imposto **apurado pelo regime tributário do vendedor** (Simples, DAS,
+    #: presumido). Não reduz o valor recebido do canal: é pago depois, à
+    #: Receita. Somá-lo ao líquido contaria o tributo duas vezes — por isso é
+    #: uma linha própria, deduzida só no DRE.
+    sales_tax_amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Regra tributária aplicada, para auditoria da apuração.
+    tax_rule_id: Mapped[int | None] = mapped_column(BigPK, nullable=True)
     net_amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
     #: Procedência do líquido. Um painel que mistura estimativa com valor
     #: liquidado sem distinguir diverge do extrato do vendedor.

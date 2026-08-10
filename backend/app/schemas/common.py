@@ -10,6 +10,27 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 T = TypeVar("T")
 
 
+def texto_decimal(valor: Decimal) -> str:
+    """Serializa ``Decimal`` em escala canônica.
+
+    ``str(Decimal)`` preserva a escala do objeto, e a escala varia conforme o
+    caminho do código: um registro recém-criado na sessão carrega o valor como
+    veio do corpo da requisição (``10.00``), enquanto o mesmo registro relido do
+    banco volta na escala da coluna ``Numeric(18, 4)`` (``10.0000``). O mesmo
+    valor saindo com dois textos diferentes quebra comparação no cliente e faz
+    o teste de contrato depender de quando houve ``refresh``.
+
+    Aqui a escala é derivada do próprio número: zeros à direita são descartados
+    e o resultado recebe no mínimo duas casas. Precisão real acima de centavos —
+    custo unitário de peça, alíquota fracionária — é preservada, porque só os
+    zeros irrelevantes são removidos.
+    """
+    ajustado = valor.normalize()
+    if ajustado.as_tuple().exponent > -2:
+        ajustado = ajustado.quantize(Decimal("0.01"))
+    return format(ajustado, "f")
+
+
 class Base(BaseModel):
     """Base dos schemas de resposta.
 
@@ -22,7 +43,7 @@ class Base(BaseModel):
 
     @field_serializer("*", when_used="json")
     def _serializar(self, valor: Any) -> Any:
-        return str(valor) if isinstance(valor, Decimal) else valor
+        return texto_decimal(valor) if isinstance(valor, Decimal) else valor
 
 
 class Pagina(Base, Generic[T]):

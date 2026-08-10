@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.security import hash_senha
 from app.models.catalog import Product
 from app.models.channel import ChannelAccount
+from app.models.costs import BaseImposto, CategoriaDespesa, OperatingExpense, TaxRule
 from app.models.enums import Canal, PapelUsuario, StatusConta
 from app.models.metrics import AlertRule
 from app.models.tenant import Tenant, User
@@ -43,6 +44,7 @@ async def executar(db: AsyncSession) -> dict[str, int]:
     produtos = await _produtos(db, tenant.id)
     contas = await _contas_simuladas(db, tenant.id)
     regras = await _regras_alerta(db, tenant.id)
+    custos = await _custos_de_exemplo(db, tenant.id)
     await db.commit()
 
     resumo = {
@@ -51,6 +53,7 @@ async def executar(db: AsyncSession) -> dict[str, int]:
         "produtos": produtos,
         "contas": contas,
         "regras": regras,
+        "custos": custos,
     }
     log.info("seed_concluido", **resumo)
     return resumo
@@ -155,6 +158,62 @@ async def _contas_simuladas(db: AsyncSession, tenant_id: int) -> int:
         criadas += 1
 
     return criadas
+
+
+async def _custos_de_exemplo(db: AsyncSession, tenant_id: int) -> int:
+    """Regra tributária e despesas fixas de exemplo — **só em modo mock**.
+
+    A restrição é deliberada e vale mais do que a conveniência: uma alíquota
+    semeada automaticamente numa instalação real produziria um lucro
+    aparentemente apurado sobre um imposto que o vendedor não paga. Numa base de
+    demonstração o número é claramente de exemplo; numa base real seria um erro
+    de decisão de preço com cara de relatório pronto.
+
+    Sem essa carga, o DRE de uma instalação nova exibe o aviso de regra
+    tributária ausente — que é a resposta correta, não uma falha.
+    """
+    if not settings.USE_MOCK_CONNECTORS:
+        return 0
+
+    criados = 0
+
+    if not await db.scalar(select(TaxRule).where(TaxRule.tenant_id == tenant_id)):
+        db.add(
+            TaxRule(
+                tenant_id=tenant_id,
+                name="Simples Nacional — Anexo I (exemplo)",
+                kind="simples_nacional",
+                rate_pct=Decimal("8.00"),
+                base=BaseImposto.RECEITA_BRUTA,
+                valid_from=datetime.now(UTC).date().replace(month=1, day=1),
+                notes="Valor de demonstração. Substitua pela alíquota do seu regime.",
+            )
+        )
+        criados += 1
+
+    if not await db.scalar(
+        select(OperatingExpense).where(OperatingExpense.tenant_id == tenant_id)
+    ):
+        mes = datetime.now(UTC).date().replace(day=1)
+        exemplos = [
+            ("Aluguel do galpão", CategoriaDespesa.ALUGUEL, Decimal("2500.00")),
+            ("Pró-labore", CategoriaDespesa.PESSOAL, Decimal("3500.00")),
+            ("Contabilidade", CategoriaDespesa.CONTABILIDADE, Decimal("600.00")),
+        ]
+        for descricao, categoria, valor in exemplos:
+            db.add(
+                OperatingExpense(
+                    tenant_id=tenant_id,
+                    description=f"{descricao} (exemplo)",
+                    category=categoria,
+                    amount=valor,
+                    competence_month=mes,
+                    is_recurring=True,
+                )
+            )
+            criados += 1
+
+    return criados
 
 
 async def _regras_alerta(db: AsyncSession, tenant_id: int) -> int:

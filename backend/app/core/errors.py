@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -106,9 +107,15 @@ def registrar_tratadores(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def _validacao(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # ``exc.errors()`` devolve o ``ctx`` cru do Pydantic, que em campos
+        # monetários carrega os limites como ``Decimal`` — tipo que o
+        # ``json.dumps`` do JSONResponse não serializa. Sem o encoder, toda
+        # alíquota ou valor fora de faixa viraria 500 em vez de 422.
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=_corpo("erro_validacao", "Dados de entrada inválidos.", {"campos": exc.errors()}),
+            content=jsonable_encoder(
+                _corpo("erro_validacao", "Dados de entrada inválidos.", {"campos": exc.errors()})
+            ),
         )
 
     @app.exception_handler(Exception)

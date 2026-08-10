@@ -98,7 +98,87 @@ Visão consolidada por SKU base — o mesmo produto vendido em 4 anúncios de 2 
 aparece como uma linha só, que é justamente o que o painel nativo de cada
 marketplace não consegue mostrar.
 
-## Aba 6 — Logística
+**Cadastro de produtos internos** com custo unitário e custo de embalagem —
+os dois compõem o CMV, congelado na data da venda. Criar, editar e excluir;
+produto com venda registrada é **desativado em vez de apagado**, para que o
+histórico de margem continue consultável. Alerta de produtos sem custo, porque
+custo zero faz a margem daquele item aparecer maior do que é.
+
+**De-para de SKUs** em duas listas: as pendências (SKU visto na importação sem
+produto correspondente) e os vínculos já configurados, estes com a ação de
+desfazer — que devolve o SKU às pendências sem alterar o custo já congelado nas
+vendas antigas.
+
+## Aba 6 — Custos e Lucro Real
+
+A aba que existe porque **nenhum marketplace conhece três números que decidem se
+o negócio dá lucro**: o custo do produto, o imposto do regime do vendedor e a
+despesa fixa do mês. Até o líquido recebido, o painel repete o que o canal
+informa; daqui para baixo é o que só o vendedor sabe.
+
+**DRE gerencial até o lucro operacional**, linha a linha, com o percentual de
+cada linha sobre a receita bruta:
+
+```
+    Receita bruta de vendas
+(−) Cancelamentos
+(−) Devoluções e reembolsos
+(=) Receita líquida de vendas
+(+) Frete cobrado do comprador
+(−) Comissão do marketplace
+(−) Taxa de meio de pagamento
+(−) Custo de frete
+(−) Imposto retido pelo canal
+(+) Descontos e bônus do canal
+(±) Ajustes não discriminados pelo canal
+(=) Líquido recebido dos canais        ← até aqui, o canal informa
+(−) Imposto sobre vendas               ← regime do vendedor
+(−) CMV (produto + embalagem)          ← custo congelado na venda
+(=) Margem de contribuição
+(−) Despesas operacionais
+(=) Lucro operacional                  ← o lucro real
+```
+
+**A coluna fecha no total.** O líquido é importado do canal, nunca recalculado
+a partir das taxas — recalculá-lo faria o painel divergir do extrato. Só que a
+soma das taxas discriminadas quase nunca bate exatamente com ele: parte do custo
+de frete é faturada à parte em vez de descontada do repasse, e nem todo ajuste
+vem detalhado por pedido. A linha **(±) Ajustes não discriminados** absorve essa
+diferença explicitamente, de modo que somar a coluna à mão dê o total impresso.
+O tamanho dessa linha é, ele próprio, um diagnóstico: valor alto significa
+detalhamento de taxas incompleto, e o lugar de investigar é a aba de
+conciliação.
+
+**Imposto retido ≠ imposto sobre vendas.** O primeiro o canal já desconta antes
+de repassar, e por isso está embutido no líquido. O segundo chega cheio na conta
+e é recolhido depois — somá-lo ao líquido contaria o tributo duas vezes. São
+duas linhas distintas de propósito.
+
+**Regras tributárias com vigência.** A alíquota tem `valid_from`/`valid_to`, e o
+imposto de um pedido é calculado pela regra vigente **na data da venda**, não
+pela de hoje. Sem isso, subir de faixa no Simples reescreveria retroativamente o
+lucro de todos os meses anteriores. Base de cálculo configurável (receita bruta,
+bruta + frete, ou líquida) e regra opcional por canal.
+
+**Despesas operacionais por competência.** Aluguel, pró-labore, contador e
+software entram no mês a que se referem, não no mês em que foram pagos, e ficam
+**fora do pedido** de propósito: ratear despesa fixa por venda produziria um
+"custo por pedido" que muda conforme o volume do mês, o que não ajuda ninguém a
+decidir preço. Despesas marcadas como recorrentes podem ser replicadas para o
+mês seguinte com um clique.
+
+**Indicadores:** margem de contribuição (R$ e %), lucro operacional (R$ e %),
+lucro por pedido, ticket médio, carga tributária efetiva, taxa efetiva do canal
+e **ponto de equilíbrio** — a receita bruta necessária para cobrir todos os
+custos do período.
+
+**Sinalização de dado incompleto.** Quando falta custo de produto ou regra
+tributária vigente, o DRE marca `qualidade.confiavel = false` e exibe o que
+falta, em vez de apresentar um lucro incompleto como se fosse final. Um DRE com
+custo faltando mostra lucro maior que o real — e é exatamente o tipo de número
+em que alguém baseia uma decisão de preço.
+
+## Aba 7 — Logística
 
 Distribuição por status de envio e por canal logístico (Full, Flex, Correios,
 Shopee Xpress). **Envios em atraso** = `now() > estimated_delivery AND status ≠
@@ -106,7 +186,7 @@ delivered`, ordenados por dias de atraso. Prazo médio real por canal e por esta
 Ocorrências logísticas (extraviado, devolvido, recusado). Mapa do Brasil por estado
 com volume e prazo médio. Rastreio consultável direto na tela.
 
-## Aba 7 — Atendimento e Reputação
+## Aba 8 — Atendimento e Reputação
 
 Perguntas não respondidas com cronômetro desde a chegada (tempo de resposta é fator
 de ranqueamento no ML). Mensagens pós-venda. Reclamações por estágio, motivo e
@@ -115,16 +195,20 @@ negativos. Indicadores: tempo médio de primeira resposta, % respondidas em < 1 
 taxa de reclamação, evolução da reputação (a partir dos `metrics_snapshots`
 diários — o histórico que os marketplaces não fornecem).
 
-## Aba 8 — Marketing e Campanhas
+## Aba 9 — Marketing e Campanhas
 
 Campanhas ativas e encerradas por canal, com período, tipo e itens participantes.
 Desconto concedido em R$ e %. **Rentabilidade por campanha**: receita gerada,
-desconto, taxas, custo de mídia (quando a Ads API estiver liberada) e margem
-resultante — respondendo a pergunta que o seller realmente faz, que é "essa
+desconto, taxas, custo de mídia e margem resultante — respondendo a pergunta que o seller realmente faz, que é "essa
 promoção deu lucro?". Comparativo de vendas dentro e fora de campanha para o mesmo
 SKU, e ROAS quando houver dados de mídia.
 
-## Aba 9 — Relatórios e Análises
+O custo de mídia é **lançável manualmente por campanha**: a Ads API da Shopee
+exige whitelist adicional e o Mercado Livre não expõe custo de mídia consolidado
+por campanha. Sem o lançamento manual, o cálculo de retorno simplesmente não
+existiria enquanto a liberação não sai.
+
+## Aba 10 — Relatórios e Análises
 
 Série temporal com granularidade selecionável (hora/dia/semana/mês). Comparação de
 períodos sobrepostos (mês atual × anterior × mesmo mês do ano passado). Curva de
@@ -133,7 +217,7 @@ marketplaces e estados. Margem estimada por produto. Análise de coorte por mês
 primeira venda. **Exportação em CSV, XLSX e PDF**, com jobs assíncronos para
 volumes grandes.
 
-## Aba 10 — Configurações
+## Aba 11 — Configurações
 
 Conexão de contas (botão "Conectar" por marketplace, status de cada uma, última
 sincronização, botão de revogar). Gestão de tokens: validade, próximo refresh,

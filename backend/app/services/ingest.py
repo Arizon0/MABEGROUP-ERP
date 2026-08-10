@@ -207,7 +207,11 @@ async def _sincronizar_itens(
             custo = custo_anterior
         elif produto_id:
             produto = await db.get(Product, produto_id)
-            custo = produto.unit_cost if produto else ZERO
+            # Embalagem entra no custo unitário: em item de baixo valor, ela é
+            # a diferença entre margem positiva e negativa.
+            custo = (
+                (produto.unit_cost + produto.packaging_cost) if produto else ZERO
+            )
         else:
             custo = ZERO
 

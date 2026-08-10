@@ -155,7 +155,7 @@ consegue explicar depois.
 | [04 — APIs oficiais](docs/04-mapa-de-endpoints-apis.md) | Levantamento completo dos módulos, o que cada um retorna e para que serve |
 | [05 — Tempo real](docs/05-tempo-real.md) | Webhooks + polling + reconciliação, latências reais, orçamento de rate limit |
 | [06 — Financeiro](docs/06-financeiro-conciliacao.md) | Fórmulas de bruto e líquido por canal, conciliação em 3 níveis, diagnóstico de divergência |
-| [07 — Painel](docs/07-dashboards-metricas.md) | As 10 abas em detalhe e a definição formal de cada métrica |
+| [07 — Painel](docs/07-dashboards-metricas.md) | As 11 abas em detalhe e a definição formal de cada métrica |
 | [08 — Segurança](docs/08-seguranca.md) | Modelo de ameaças, cofre de tokens, isolamento multi-tenant, LGPD |
 | [09 — Deploy](docs/09-deploy.md) | Topologia, CI/CD, observabilidade, backup, custos por estágio |
 | [10 — Riscos](docs/10-riscos-limitacoes.md) | Limitações reais de cada API e a alternativa adotada |
@@ -163,6 +163,7 @@ consegue explicar depois.
 | [12 — Análise de dados](docs/12-analise-de-dados.md) | O que a API entrega pronto × o que o sistema calcula |
 | [13 — Instalação](docs/13-instalacao.md) | Passo a passo local e de produção |
 | [14 — Conectar APIs reais](docs/14-conectar-apis-reais.md) | **Do modo simulado às contas reais**, portal por portal |
+| [15 — Auditoria completa](docs/15-auditoria-completa.md) | Verificação de ponta a ponta: cálculos, CRUD, defeitos encontrados e corrigidos |
 
 ---
 
@@ -182,7 +183,7 @@ backend/
 ├── alembic/         Migrations versionadas
 └── tests/           107 testes
 frontend/src/
-├── pages/           As 10 abas
+├── pages/           As 11 abas
 ├── components/      Interface e gráficos
 ├── api/             Cliente HTTP tipado + hooks de dados
 └── hooks/           SSE do painel ao vivo

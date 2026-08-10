@@ -8,6 +8,7 @@ from app.api.v1 import (
     admin,
     auth,
     catalog,
+    costs,
     dashboard,
     finance,
     live,
@@ -32,6 +33,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(orders.router)
 api_router.include_router(finance.router)
 api_router.include_router(catalog.router)
+api_router.include_router(costs.router)
 api_router.include_router(operations.router)
 api_router.include_router(reports.router)
 api_router.include_router(admin.router)

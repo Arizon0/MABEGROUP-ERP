@@ -12,6 +12,7 @@ from app.models.catalog import (
     SkuLink,
     SkuPendency,
 )
+from app.models.costs import MonthlyClose, OperatingExpense, TaxRule
 from app.models.channel import (
     ChannelAccount,
     ChannelCredential,
@@ -53,6 +54,8 @@ __all__ = [
     "Question", "Message", "Claim", "ClaimEvent", "Review",
     # Marketing
     "Campaign", "CampaignItem",
+    # Custos e impostos
+    "TaxRule", "OperatingExpense", "MonthlyClose",
     # Métricas
     "MetricHourly", "MetricDaily", "MetricSnapshot", "AlertRule", "Alert",
 ]

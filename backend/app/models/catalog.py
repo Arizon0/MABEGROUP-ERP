@@ -42,6 +42,10 @@ class Product(Base, TimestampMixin):
     category: Mapped[str] = mapped_column(String(160), default="")
     #: Custo atual. O custo usado numa venda é congelado em ``order_items``.
     unit_cost: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Embalagem e material de envio por unidade. Entra no CMV junto do custo do
+    #: produto — em item de baixo valor costuma ser a diferença entre margem
+    #: positiva e negativa.
+    packaging_cost: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
     ncm: Mapped[str] = mapped_column(String(20), default="")
     ean: Mapped[str] = mapped_column(String(20), default="")
     weight_grams: Mapped[int] = mapped_column(Integer, default=0)

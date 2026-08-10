@@ -1,4 +1,5 @@
 /** Peças de interface reutilizadas pelas dez abas. */
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { ROTULO_CANAL, ROTULO_STATUS, brl, corDoCanal, num, pct } from '@/lib/format'
@@ -214,6 +215,138 @@ export function Tabela({
           )}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// --- Formulários e ações destrutivas -----------------------------------------
+
+export function Campo({
+  rotulo,
+  dica,
+  children,
+}: {
+  rotulo: string
+  dica?: string
+  children: ReactNode
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-ink-soft">{rotulo}</span>
+      {children}
+      {dica && <span className="text-[11px] text-ink-muted">{dica}</span>}
+    </label>
+  )
+}
+
+/**
+ * Diálogo modal simples.
+ *
+ * Usa `<dialog>` nativo pelo que ele traz de graça e que uma div não tem:
+ * foco preso dentro do diálogo, fechamento no `Esc` e semântica de modal para
+ * leitor de tela.
+ */
+export function Modal({
+  aberto,
+  titulo,
+  descricao,
+  aoFechar,
+  children,
+}: {
+  aberto: boolean
+  titulo: string
+  descricao?: string
+  aoFechar: () => void
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const dialogo = ref.current
+    if (!dialogo) return
+    if (aberto && !dialogo.open) dialogo.showModal()
+    if (!aberto && dialogo.open) dialogo.close()
+  }, [aberto])
+
+  return (
+    <dialog
+      ref={ref}
+      onCancel={(evento) => {
+        evento.preventDefault()
+        aoFechar()
+      }}
+      onClick={(evento) => {
+        // Clique no backdrop (o próprio elemento, fora do conteúdo) fecha.
+        if (evento.target === ref.current) aoFechar()
+      }}
+      className="w-[min(32rem,92vw)] rounded-xl border border-line bg-surface p-0 text-ink backdrop:bg-black/40"
+    >
+      <div className="border-b border-line px-4 py-3">
+        <h3 className="card-title">{titulo}</h3>
+        {descricao && <p className="card-sub mt-0.5">{descricao}</p>}
+      </div>
+      <div className="p-4">{children}</div>
+    </dialog>
+  )
+}
+
+/**
+ * Botão de exclusão com confirmação embutida.
+ *
+ * A confirmação fica no próprio botão em vez de um `window.confirm`: o texto
+ * diz o que será apagado, e o segundo clique exige mirar de novo — o bastante
+ * para evitar o apagamento por reflexo sem transformar cada remoção em um
+ * diálogo de duas telas.
+ */
+export function BotaoExcluir({
+  aoConfirmar,
+  rotulo = 'Excluir',
+  confirmacao = 'Confirmar exclusão?',
+  ocupado = false,
+}: {
+  aoConfirmar: () => void
+  rotulo?: string
+  confirmacao?: string
+  ocupado?: boolean
+}) {
+  const [armado, setArmado] = useState(false)
+
+  useEffect(() => {
+    if (!armado) return
+    // Some sozinho: um botão que fica armado indefinidamente vira armadilha
+    // para o próximo clique, que já não lembra que estava confirmando.
+    const t = setTimeout(() => setArmado(false), 4000)
+    return () => clearTimeout(t)
+  }, [armado])
+
+  return (
+    <button
+      type="button"
+      disabled={ocupado}
+      className={`btn px-2 py-1 text-xs ${
+        armado ? 'border-bad-line bg-bad-soft text-bad' : 'text-ink-soft'
+      }`}
+      onClick={() => {
+        if (armado) {
+          aoConfirmar()
+          setArmado(false)
+        } else {
+          setArmado(true)
+        }
+      }}
+    >
+      {ocupado ? 'Removendo…' : armado ? confirmacao : rotulo}
+    </button>
+  )
+}
+
+/** Aviso de qualidade do dado: o número existe, mas não está completo. */
+export function AvisoQualidade({ texto }: { texto: string }) {
+  if (!texto) return null
+  return (
+    <div className="flex gap-2 rounded-lg border border-warn-line bg-warn-soft p-3 text-xs text-warn">
+      <span aria-hidden>⚠</span>
+      <p className="whitespace-pre-line">{texto}</p>
     </div>
   )
 }

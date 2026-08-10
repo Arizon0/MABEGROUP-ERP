@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
 
-import { KpiCard, SeloProcedencia, SeloStatus } from './ui'
+import { AvisoQualidade, BotaoExcluir, KpiCard, SeloProcedencia, SeloStatus } from './ui'
 
 describe('KpiCard', () => {
   it('formata o valor como moeda e mostra a variação com sinal', () => {
@@ -36,5 +37,51 @@ describe('SeloStatus', () => {
   it('exibe o valor original quando o status é desconhecido', () => {
     render(<SeloStatus status="status_novo_do_canal" />)
     expect(screen.getByText('status_novo_do_canal')).toBeInTheDocument()
+  })
+})
+
+describe('BotaoExcluir', () => {
+  it('exige um segundo clique antes de apagar', async () => {
+    const usuario = userEvent.setup()
+    const aoConfirmar = vi.fn()
+    render(<BotaoExcluir aoConfirmar={aoConfirmar} />)
+
+    await usuario.click(screen.getByRole('button', { name: 'Excluir' }))
+    expect(aoConfirmar).not.toHaveBeenCalled()
+
+    await usuario.click(screen.getByRole('button', { name: 'Confirmar exclusão?' }))
+    expect(aoConfirmar).toHaveBeenCalledOnce()
+  })
+
+  it('volta ao estado inicial se a confirmação não vier', () => {
+    // `fireEvent` em vez de `userEvent` aqui de propósito: o `userEvent` espera
+    // por timers reais entre os passos e trava sob `useFakeTimers`.
+    vi.useFakeTimers()
+    try {
+      render(<BotaoExcluir aoConfirmar={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Excluir' }))
+      expect(screen.getByRole('button', { name: 'Confirmar exclusão?' })).toBeInTheDocument()
+
+      // Um botão que fica armado indefinidamente vira armadilha para o clique
+      // seguinte, que já não lembra que estava confirmando.
+      act(() => {
+        vi.advanceTimersByTime(4500)
+      })
+      expect(screen.getByRole('button', { name: 'Excluir' })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('AvisoQualidade', () => {
+  it('não ocupa espaço quando não há o que avisar', () => {
+    const { container } = render(<AvisoQualidade texto="" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('mostra o que falta em vez de deixar o número parecer completo', () => {
+    render(<AvisoQualidade texto="12 itens sem custo cadastrado." />)
+    expect(screen.getByText(/12 itens sem custo/)).toBeInTheDocument()
   })
 })

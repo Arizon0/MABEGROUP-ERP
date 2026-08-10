@@ -6,14 +6,19 @@ import type {
   Anuncio,
   Cascata,
   Conta,
+  Despesa,
   Divergencia,
+  DRE,
   Filtros,
   ListaPedidos,
+  Mapeamento,
+  MesDRE,
   LinhaProduto,
   Pendencia,
   PontoSerie,
   Produto,
   Pulso,
+  RegraImposto,
   ResumoCanal,
   SaudeEstoque,
   Usuario,
@@ -332,3 +337,111 @@ export function useReprocessarWebhook() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks'] }),
   })
 }
+
+// --- Custos, impostos e DRE --------------------------------------------------
+
+/** Toda escrita de custo, imposto ou despesa muda o lucro exibido em várias
+ *  abas ao mesmo tempo. Invalidar só a própria lista deixaria o DRE e a visão
+ *  geral mostrando o resultado anterior — por isso o cache inteiro cai. */
+function useMutacaoDeCusto<TEntrada>(
+  executar: (entrada: TEntrada) => Promise<unknown>,
+) {
+  const qc = useQueryClient()
+  return useMutation<unknown, Error, TEntrada>({
+    mutationFn: executar,
+    onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+export const useRegrasImposto = () =>
+  useQuery({
+    queryKey: ['tax-rules'],
+    queryFn: () => api<RegraImposto[]>('/costs/tax-rules'),
+    ...PADRAO,
+  })
+
+export const useDespesas = (mes?: string) =>
+  useQuery({
+    queryKey: ['expenses', mes ?? 'todas'],
+    queryFn: () => api<Despesa[]>('/costs/expenses', { params: { mes } }),
+    ...PADRAO,
+  })
+
+export const useDRE = (f: Filtros) =>
+  useQuery({
+    queryKey: ['dre', f],
+    queryFn: () => api<DRE>('/costs/dre', { params: f }),
+    ...PADRAO,
+  })
+
+export const useDREMensal = (meses = 12) =>
+  useQuery({
+    queryKey: ['dre-monthly', meses],
+    queryFn: () => api<MesDRE[]>('/costs/dre/monthly', { params: { meses } }),
+    ...PADRAO,
+  })
+
+export const useSalvarRegra = () =>
+  useMutacaoDeCusto<{ id?: number } & Record<string, unknown>>(({ id, ...dados }) =>
+    api(id ? `/costs/tax-rules/${id}` : '/costs/tax-rules', {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(dados),
+    }),
+  )
+
+export const useRemoverRegra = () =>
+  useMutacaoDeCusto<number>((id) => api(`/costs/tax-rules/${id}`, { method: 'DELETE' }))
+
+export const useReapurarImpostos = () =>
+  useMutacaoDeCusto<{ inicio?: string; fim?: string }>((params) =>
+    api('/costs/tax-rules/apply', { method: 'POST', params }),
+  )
+
+export const useSalvarDespesa = () =>
+  useMutacaoDeCusto<{ id?: number } & Record<string, unknown>>(({ id, ...dados }) =>
+    api(id ? `/costs/expenses/${id}` : '/costs/expenses', {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(dados),
+    }),
+  )
+
+export const useRemoverDespesa = () =>
+  useMutacaoDeCusto<number>((id) => api(`/costs/expenses/${id}`, { method: 'DELETE' }))
+
+export const useReplicarDespesas = () =>
+  useMutacaoDeCusto<{ origem: string; destino: string }>((params) =>
+    api('/costs/expenses/replicate', { method: 'POST', params }),
+  )
+
+// --- Edições e exclusões nas demais abas -------------------------------------
+
+export const useSalvarProduto = () =>
+  useMutacaoDeCusto<{ id?: number } & Record<string, unknown>>(({ id, ...dados }) =>
+    api(id ? `/catalog/products/${id}` : '/catalog/products', {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(dados),
+    }),
+  )
+
+export const useRemoverProduto = () =>
+  useMutacaoDeCusto<number>((id) => api(`/catalog/products/${id}`, { method: 'DELETE' }))
+
+export const useDesfazerMapeamento = () =>
+  useMutacaoDeCusto<number>((id) => api(`/catalog/sku-links/${id}`, { method: 'DELETE' }))
+
+export const useCustoEmLote = () =>
+  useMutacaoDeCusto<{ sku: string; unit_cost: string; packaging_cost?: string }[]>((linhas) =>
+    api('/catalog/products/bulk-cost', { method: 'POST', body: JSON.stringify(linhas) }),
+  )
+
+export const useMapeamentos = () =>
+  useQuery({
+    queryKey: ['sku-links'],
+    queryFn: () => api<Mapeamento[]>('/catalog/sku-links'),
+    ...PADRAO,
+  })
+
+export const useCustoDeMidia = () =>
+  useMutacaoDeCusto<{ id: number; manual_media_cost: string }>(({ id, ...dados }) =>
+    api(`/marketing/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(dados) }),
+  )

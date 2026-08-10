@@ -26,6 +26,7 @@ class ProdutoIn(BaseModel):
     brand: str = ""
     category: str = ""
     unit_cost: Decimal = Decimal("0")
+    packaging_cost: Decimal = Decimal("0")
     ncm: str = ""
     ean: str = ""
     weight_grams: int = 0
@@ -37,6 +38,7 @@ class ProdutoOut(Base):
     name: str
     brand: str
     unit_cost: Decimal
+    packaging_cost: Decimal
     is_active: bool
 
 
@@ -44,6 +46,12 @@ class MapeamentoIn(BaseModel):
     channel: str
     sku_channel: str
     product_id: int
+
+
+class CustoEmLoteIn(BaseModel):
+    sku: str
+    unit_cost: Decimal = Field(ge=0)
+    packaging_cost: Decimal | None = Field(default=None, ge=0)
 
 
 @router.get("/listings", summary="Anúncios com sinalização de ruptura")
@@ -261,6 +269,147 @@ async def atualizar_produto(
     )
     await db.commit()
     return ProdutoOut.model_validate(produto)
+
+
+@router.delete(
+    "/products/{produto_id}",
+    response_model=RespostaOperacao,
+    summary="Remove ou desativa um produto",
+)
+async def remover_produto(
+    produto_id: int, ctx: AnalistaDep, db: DbDep, forcar: bool = False
+) -> RespostaOperacao:
+    """Desativa o produto; só exclui de fato se ele nunca foi vendido.
+
+    Excluir um produto com histórico apagaria o custo congelado nos itens já
+    vendidos e reescreveria a margem de meses fechados. Por isso o padrão é
+    desativar: some das listas de seleção, o histórico continua íntegro.
+    """
+    produto = await db.scalar(
+        select(Product).where(Product.id == produto_id, Product.tenant_id == ctx.tenant_id)
+    )
+    if produto is None:
+        raise NaoEncontrado("Produto não encontrado.")
+
+    vendas = await db.scalar(
+        select(func.count(OrderItem.id)).where(OrderItem.product_id == produto_id)
+    )
+
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action="product.deleted" if not vendas else "product.deactivated",
+        entity_type="product",
+        entity_id=produto_id,
+        before={"sku": produto.sku, "vendas": int(vendas or 0)},
+    )
+
+    if vendas:
+        produto.is_active = False
+        await db.commit()
+        return RespostaOperacao(
+            mensagem=(
+                f"Produto {produto.sku} desativado. Não foi excluído porque tem "
+                f"{vendas} itens vendidos — apagá-lo reescreveria a margem do histórico."
+            ),
+            dados={"desativado": True, "itens_vendidos": int(vendas)},
+        )
+
+    await db.delete(produto)
+    await db.commit()
+    return RespostaOperacao(mensagem=f"Produto {produto.sku} excluído.", dados={"excluido": True})
+
+
+@router.delete(
+    "/sku-links/{vinculo_id}",
+    response_model=RespostaOperacao,
+    summary="Desfaz um de-para de SKU",
+)
+async def remover_mapeamento(vinculo_id: int, ctx: AnalistaDep, db: DbDep) -> RespostaOperacao:
+    """Desfaz o vínculo e devolve o SKU para a fila de pendências.
+
+    O custo já congelado nos pedidos **não** é revertido: a venda aconteceu com
+    aquele custo, e reescrevê-lo mudaria a margem de um período já apurado.
+    """
+    vinculo = await db.scalar(
+        select(SkuLink).where(SkuLink.id == vinculo_id, SkuLink.tenant_id == ctx.tenant_id)
+    )
+    if vinculo is None:
+        raise NaoEncontrado("Mapeamento não encontrado.")
+
+    pendencia = await db.scalar(
+        select(SkuPendency).where(
+            SkuPendency.tenant_id == ctx.tenant_id,
+            SkuPendency.channel == vinculo.channel,
+            SkuPendency.sku_channel == vinculo.sku_channel,
+        )
+    )
+    if pendencia:
+        pendencia.resolved = False
+        pendencia.last_seen_at = datetime.now(UTC)
+
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action="sku_link.deleted",
+        entity_type="sku_link",
+        entity_id=vinculo_id,
+        before={"channel": vinculo.channel, "sku_channel": vinculo.sku_channel},
+    )
+    await db.delete(vinculo)
+    await db.commit()
+    return RespostaOperacao(
+        mensagem=(
+            f"Vínculo de {vinculo.sku_channel} desfeito. O custo já registrado nas "
+            f"vendas anteriores foi preservado."
+        )
+    )
+
+
+@router.post(
+    "/products/bulk-cost",
+    response_model=RespostaOperacao,
+    summary="Atualiza custos em lote",
+)
+async def atualizar_custos_em_lote(
+    dados: list[CustoEmLoteIn], ctx: AnalistaDep, db: DbDep
+) -> RespostaOperacao:
+    """Ajusta custo e embalagem de vários produtos de uma vez.
+
+    Afeta apenas vendas futuras — o custo das vendas já registradas continua
+    congelado.
+    """
+    atualizados = 0
+    nao_encontrados: list[str] = []
+
+    for linha in dados:
+        produto = await db.scalar(
+            select(Product).where(
+                Product.tenant_id == ctx.tenant_id, Product.sku == linha.sku
+            )
+        )
+        if produto is None:
+            nao_encontrados.append(linha.sku)
+            continue
+        produto.unit_cost = linha.unit_cost
+        if linha.packaging_cost is not None:
+            produto.packaging_cost = linha.packaging_cost
+        atualizados += 1
+
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action="product.bulk_cost",
+        after={"atualizados": atualizados, "nao_encontrados": nao_encontrados},
+    )
+    await db.commit()
+    return RespostaOperacao(
+        mensagem=f"{atualizados} produtos atualizados.",
+        dados={"atualizados": atualizados, "nao_encontrados": nao_encontrados},
+    )
 
 
 @router.get(

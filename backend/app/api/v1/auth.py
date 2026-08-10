@@ -4,9 +4,11 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy import func
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.deps import AdminDep, CtxDep, DbDep, usuario_atual
+from app.core.errors import Conflito, NaoEncontrado
 from app.models.enums import PapelUsuario
 from app.models.tenant import Tenant, User
 from app.schemas.common import Base, RespostaOperacao
@@ -124,6 +126,83 @@ async def criar_usuario(dados: NovoUsuarioIn, ctx: AdminDep, db: DbDep) -> Usuar
         entity_type="user",
         entity_id=usuario.id,
         after={"email": usuario.email, "role": usuario.role},
+    )
+    await db.commit()
+    return UsuarioOut.model_validate(usuario)
+
+
+class AtualizarUsuarioIn(BaseModel):
+    nome: str | None = None
+    papel: str | None = None
+    is_active: bool | None = None
+    senha: str | None = Field(default=None, min_length=10, max_length=200)
+
+
+@router.patch(
+    "/usuarios/{usuario_id}",
+    response_model=UsuarioOut,
+    summary="Edita usuário, troca senha ou desativa",
+)
+async def atualizar_usuario(
+    usuario_id: int, dados: AtualizarUsuarioIn, ctx: AdminDep, db: DbDep
+) -> UsuarioOut:
+    """Altera papel, nome, senha ou situação.
+
+    Usuário é desativado, nunca excluído: o ``user_id`` continua referenciado
+    na trilha de auditoria, e apagá-lo deixaria registros órfãos justamente na
+    tabela usada para investigar incidentes.
+    """
+    from sqlalchemy import select as _select
+
+    from app.core.security import hash_senha
+
+    usuario = await db.scalar(
+        _select(User).where(User.id == usuario_id, User.tenant_id == ctx.tenant_id)
+    )
+    if usuario is None:
+        raise NaoEncontrado("Usuário não encontrado.")
+
+    # Impede que a organização fique sem ninguém capaz de administrá-la.
+    if (dados.is_active is False or dados.papel not in (None, PapelUsuario.PROPRIETARIO)) and (
+        usuario.role == PapelUsuario.PROPRIETARIO
+    ):
+        restantes = await db.scalar(
+            _select(func.count(User.id)).where(
+                User.tenant_id == ctx.tenant_id,
+                User.role == PapelUsuario.PROPRIETARIO,
+                User.is_active.is_(True),
+                User.id != usuario_id,
+            )
+        )
+        if not restantes:
+            raise Conflito(
+                "Esta é a única conta de proprietário ativa. Promova outro usuário "
+                "antes de desativá-la ou rebaixá-la."
+            )
+
+    antes = {"role": usuario.role, "is_active": usuario.is_active}
+    if dados.nome is not None:
+        usuario.full_name = dados.nome
+    if dados.papel is not None:
+        usuario.role = dados.papel
+    if dados.is_active is not None:
+        usuario.is_active = dados.is_active
+    if dados.senha:
+        usuario.password_hash = hash_senha(dados.senha)
+
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action=audit.Acao.USUARIO_ALTERADO,
+        entity_type="user",
+        entity_id=usuario_id,
+        before=antes,
+        after={
+            "role": usuario.role,
+            "is_active": usuario.is_active,
+            "senha_alterada": bool(dados.senha),
+        },
     )
     await db.commit()
     return UsuarioOut.model_validate(usuario)

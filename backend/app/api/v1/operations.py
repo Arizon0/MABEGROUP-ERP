@@ -6,9 +6,12 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.core.deps import CtxDep, DbDep
+from app.core.deps import AnalistaDep, CtxDep, DbDep
+from app.core.errors import NaoEncontrado
+from app.services import audit
 from app.models.enums import StatusEnvio, StatusPedido
 from app.models.marketing import Campaign, CampaignItem
 from app.models.metrics import MetricSnapshot
@@ -328,6 +331,51 @@ async def campanhas(ctx: CtxDep, db: DbDep, dias: int = Query(90, le=365)) -> li
             }
         )
     return saida
+
+
+class CustoMidiaIn(BaseModel):
+    manual_media_cost: Decimal = Field(ge=0)
+
+
+@router.patch(
+    "/marketing/campaigns/{campanha_id}",
+    summary="Lança o custo de mídia da campanha",
+    description=(
+        "A Ads API da Shopee exige whitelist separada e o Mercado Livre não "
+        "expõe custo por campanha. Sem este lançamento manual, a rentabilidade "
+        "da campanha ficaria estruturalmente incompleta."
+    ),
+)
+async def lancar_custo_midia(
+    campanha_id: int, dados: CustoMidiaIn, ctx: AnalistaDep, db: DbDep
+) -> dict[str, Any]:
+    campanha = await db.scalar(
+        select(Campaign).where(
+            Campaign.id == campanha_id, Campaign.tenant_id == ctx.tenant_id
+        )
+    )
+    if campanha is None:
+        raise NaoEncontrado("Campanha não encontrada.")
+
+    antes = str(campanha.manual_media_cost)
+    campanha.manual_media_cost = dados.manual_media_cost
+
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action="campaign.media_cost_updated",
+        entity_type="campaign",
+        entity_id=campanha_id,
+        before={"manual_media_cost": antes},
+        after={"manual_media_cost": str(dados.manual_media_cost)},
+    )
+    await db.commit()
+    return {
+        "id": campanha.id,
+        "name": campanha.name,
+        "manual_media_cost": str(campanha.manual_media_cost),
+    }
 
 
 def _aware(valor: datetime) -> datetime:

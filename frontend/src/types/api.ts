@@ -195,7 +195,18 @@ export interface Produto {
   name: string
   brand: string
   unit_cost: string
+  packaging_cost: string
   is_active: boolean
+}
+
+export interface Mapeamento {
+  id: number
+  channel: Canal
+  sku_channel: string
+  product_id: number
+  product_sku: string
+  product_name: string
+  confidence: string
 }
 
 export interface Usuario {
@@ -216,4 +227,73 @@ export interface Filtros {
   status?: string
   logistic_type?: string
   state?: string
+}
+
+// --- Custos, impostos e DRE --------------------------------------------------
+
+export interface RegraImposto {
+  id: number
+  name: string
+  kind: string
+  rate_pct: string
+  base: 'gross_revenue' | 'gross_plus_shipping' | 'net_revenue' | string
+  channel: string
+  valid_from: string
+  valid_to: string | null
+  is_active: boolean
+  notes: string
+}
+
+export interface Despesa {
+  id: number
+  description: string
+  category: string
+  amount: string
+  competence_month: string
+  is_recurring: boolean
+  channel: string
+  notes: string
+}
+
+export interface LinhaDRE {
+  rotulo: string
+  valor: string
+  tipo: 'receita' | 'deducao' | 'subtotal' | 'resultado'
+  percentual: string
+  detalhe: string
+}
+
+export interface DRE {
+  periodo: { inicio: string; fim: string }
+  linhas: LinhaDRE[]
+  indicadores: {
+    pedidos: number
+    unidades: string
+    ticket_medio: string
+    margem_contribuicao: string
+    margem_contribuicao_pct: string
+    lucro_operacional: string
+    lucro_operacional_pct: string
+    lucro_por_pedido: string
+    ponto_de_equilibrio: string
+    taxa_efetiva_canal_pct: string
+    carga_tributaria_pct: string
+  }
+  despesas_por_categoria: Record<string, string>
+  qualidade: {
+    itens_sem_custo: number
+    pedidos_sem_imposto: number
+    confiavel: boolean
+    aviso: string
+  }
+}
+
+export interface MesDRE {
+  mes: string
+  receita_bruta: string
+  liquido: string
+  margem_contribuicao: string
+  lucro_operacional: string
+  lucro_pct: string
+  pedidos: number
 }

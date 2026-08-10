@@ -5,7 +5,7 @@
 Núcleo multi-tenant, modelo de dados completo, conectores dos três marketplaces com
 OAuth/HMAC, cofre de tokens cifrado, ingestão de webhooks idempotente, fila e jobs,
 painel ao vivo por SSE, motor financeiro em `Decimal`, conciliação, API REST
-documentada, painel com as 10 abas, conectores mock, testes e infraestrutura de
+documentada, painel com as 11 abas, conectores mock, testes e infraestrutura de
 deploy.
 
 **Critério de pronto:** `docker compose up` sobe o sistema com dados simulados e o
