@@ -96,6 +96,9 @@ class CanonicalOrder:
     #: serviço financeiro calcular a estimativa e marcar como ``computed``.
     net_amount: Decimal | None = None
     net_source: FonteLiquido = FonteLiquido.CALCULADO
+    #: Custo da mercadoria vendida, calculado na ingestão a partir do cadastro
+    #: interno de custo — o marketplace não conhece o custo do vendedor.
+    cogs: Decimal = ZERO
 
     buyer_external_id: str | None = None
     buyer_nickname: str = ""

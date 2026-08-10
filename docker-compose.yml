@@ -1,0 +1,85 @@
+# Sobe a plataforma inteira em modo simulado: nenhuma credencial de marketplace
+# é necessária para ver o produto funcionando ponta a ponta.
+#
+#   docker compose up --build
+#   Painel:  http://localhost:5173
+#   API:     http://localhost:8000/docs
+#   Acesso:  admin@marketplacehub.com.br / admin123
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: marketplace
+      POSTGRES_PASSWORD: marketplace
+      POSTGRES_DB: marketplace_hub
+    ports: ['5432:5432']
+    volumes: ['dados_postgres:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U marketplace -d marketplace_hub']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports: ['6379:6379']
+    volumes: ['dados_redis:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # As migrations rodam como job próprio, ANTES da API subir. Executá-las no
+  # startup de N réplicas causaria migrations concorrentes.
+  migrations:
+    build: ./backend
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://marketplace:marketplace@db:5432/marketplace_hub
+    depends_on:
+      db: {condition: service_healthy}
+
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment: &ambiente
+      DATABASE_URL: postgresql+asyncpg://marketplace:marketplace@db:5432/marketplace_hub
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: local
+      USE_MOCK_CONNECTORS: '1'
+      SECRET_KEY: troque-esta-chave-em-producao-0000000000
+      CORS_ORIGINS: http://localhost:5173
+      LOG_LEVEL: INFO
+    ports: ['8000:8000']
+    volumes: ['./backend:/app']
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrations: {condition: service_completed_successfully}
+
+  # Worker separado da API de propósito: um backfill de 24 meses satura CPU por
+  # horas e deixaria o painel lento se dividisse o processo.
+  worker:
+    build: ./backend
+    command: arq app.workers.settings.WorkerSettings
+    environment: *ambiente
+    volumes: ['./backend:/app']
+    depends_on:
+      api: {condition: service_started}
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports: ['5173:5173']
+    volumes: ['./frontend:/app', '/app/node_modules']
+    depends_on: [api]
+
+volumes:
+  dados_postgres:
+  dados_redis:
