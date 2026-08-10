@@ -79,9 +79,32 @@ def upgrade() -> None:
     )
     op.create_index('ix_imposto_tenant_vigencia', 'tax_rules', ['tenant_id', 'valid_from', 'valid_to'], unique=False)
     op.create_index(op.f('ix_tax_rules_tenant_id'), 'tax_rules', ['tenant_id'], unique=False)
-    op.add_column('orders', sa.Column('sales_tax_amount', sa.Numeric(precision=18, scale=4), nullable=False))
-    op.add_column('orders', sa.Column('tax_rule_id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), nullable=True))
-    op.add_column('products', sa.Column('packaging_cost', sa.Numeric(precision=18, scale=4), nullable=False))
+    # ``server_default`` é obrigatório: adicionar coluna NOT NULL numa tabela
+    # que já tem linhas falha sem ele — no Postgres e no SQLite. O default fica
+    # apenas para preencher o passado; novas linhas seguem vindo do modelo, e
+    # ele é removido logo abaixo para o schema não divergir dos models.
+    op.add_column(
+        'orders',
+        sa.Column('sales_tax_amount', sa.Numeric(precision=18, scale=4),
+                  nullable=False, server_default='0'),
+    )
+    op.add_column(
+        'orders',
+        sa.Column('tax_rule_id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'),
+                  nullable=True),
+    )
+    op.add_column(
+        'products',
+        sa.Column('packaging_cost', sa.Numeric(precision=18, scale=4),
+                  nullable=False, server_default='0'),
+    )
+
+    # Só no Postgres: o SQLite não implementa ALTER COLUMN DROP DEFAULT, e
+    # removê-lo exigiria reconstruir a tabela — custo sem retorno num banco
+    # que só existe em desenvolvimento e teste.
+    if op.get_bind().dialect.name == 'postgresql':
+        op.alter_column('orders', 'sales_tax_amount', server_default=None)
+        op.alter_column('products', 'packaging_cost', server_default=None)
     # ### end Alembic commands ###
 
 

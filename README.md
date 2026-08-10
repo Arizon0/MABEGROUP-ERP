@@ -164,6 +164,7 @@ consegue explicar depois.
 | [13 — Instalação](docs/13-instalacao.md) | Passo a passo local e de produção |
 | [14 — Conectar APIs reais](docs/14-conectar-apis-reais.md) | **Do modo simulado às contas reais**, portal por portal |
 | [15 — Auditoria completa](docs/15-auditoria-completa.md) | Verificação de ponta a ponta: cálculos, CRUD, defeitos encontrados e corrigidos |
+| [16 — Atualizar e avaliar](docs/16-atualizar-e-avaliar.md) | **Como subir a atualização** e roteiro para avaliar o sistema |
 
 ---
 
