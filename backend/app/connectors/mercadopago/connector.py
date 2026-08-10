@@ -111,7 +111,9 @@ class ConectorMercadoPago:
 
     # --- Pagamentos ---------------------------------------------------------
 
-    async def fetch_payment(self, token: str, external_id: str) -> CanonicalPayment | None:
+    async def fetch_payment(
+        self, token: str, external_id: str, **_: Any
+    ) -> CanonicalPayment | None:
         """Busca um pagamento. O normalizador é compartilhado com o ML."""
         dados = await self._api().get(f"/v1/payments/{external_id}", token=token)
         if not dados:

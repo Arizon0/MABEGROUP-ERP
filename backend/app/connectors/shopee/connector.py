@@ -190,6 +190,12 @@ class ConectorShopee:
         )
 
     # --- Pedidos ------------------------------------------------------------
+    # Todas as assinaturas de busca aceitam argumentos extras: o serviço de
+    # sincronização é genérico e passa `seller_id` e `shop_id` para qualquer
+    # canal, sem saber qual dos dois aquele marketplace usa. Sem o `**_`, a
+    # chamada quebraria com TypeError — e só com credenciais reais, porque os
+    # conectores simulados já aceitavam tudo.
+
 
     async def fetch_orders(
         self,
@@ -258,7 +264,7 @@ class ConectorShopee:
         return pedidos[0] if pedidos else None
 
     async def fetch_escrow(
-        self, token: str, order_sn: str, *, shop_id: str = ""
+        self, token: str, order_sn: str, *, shop_id: str = "", **_: Any
     ) -> CanonicalPayment | None:
         """Busca o detalhe financeiro definitivo de um pedido concluído."""
         resposta = await self._chamar(
@@ -271,7 +277,7 @@ class ConectorShopee:
         return norm.normalizar_escrow(bloco, order_sn) if bloco else None
 
     async def fetch_shipment(
-        self, token: str, order_sn: str, *, shop_id: str = ""
+        self, token: str, order_sn: str, *, shop_id: str = "", **_: Any
     ) -> CanonicalShipment | None:
         detalhe = await self._chamar(
             "/api/v2/order/get_order_detail",
@@ -296,7 +302,9 @@ class ConectorShopee:
 
     # --- Catálogo -----------------------------------------------------------
 
-    async def fetch_listings(self, token: str, *, shop_id: str = "") -> list[CanonicalListing]:
+    async def fetch_listings(
+        self, token: str, *, shop_id: str = "", **_: Any
+    ) -> list[CanonicalListing]:
         ids: list[int] = []
         offset = 0
         while True:
@@ -337,7 +345,9 @@ class ConectorShopee:
                 anuncios.append(norm.normalizar_anuncio(item, modelos))
         return anuncios
 
-    async def fetch_campaigns(self, token: str, *, shop_id: str = "") -> list[CanonicalCampaign]:
+    async def fetch_campaigns(
+        self, token: str, *, shop_id: str = "", **_: Any
+    ) -> list[CanonicalCampaign]:
         """Promoções ativas.
 
         Não cobre anúncios pagos: a Ads API da Shopee exige whitelist separada

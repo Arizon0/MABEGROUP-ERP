@@ -46,13 +46,39 @@ services:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment: &ambiente
+      # Banco e Redis apontam para os serviços do compose, não para localhost —
+      # por isso não vêm do .env (que traz os endereços de execução sem Docker).
       DATABASE_URL: postgresql+asyncpg://marketplace:marketplace@db:5432/marketplace_hub
       REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: local
-      USE_MOCK_CONNECTORS: '1'
-      SECRET_KEY: troque-esta-chave-em-producao-0000000000
-      CORS_ORIGINS: http://localhost:5173
-      LOG_LEVEL: INFO
+
+      # O restante vem do arquivo `.env` na raiz, que o Compose lê sozinho.
+      # Os valores após ":-" são o padrão quando a variável não está definida —
+      # é o que mantém o modo simulado funcionando sem nenhuma configuração.
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      USE_MOCK_CONNECTORS: ${USE_MOCK_CONNECTORS:-1}
+      SECRET_KEY: ${SECRET_KEY:-troque-esta-chave-em-producao-0000000000}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
+      BUYER_HASH_PEPPER: ${BUYER_HASH_PEPPER:-dev-pepper-troque-em-producao}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+
+      # Credenciais dos marketplaces. Vazias = o canal aparece como
+      # "não configurado" na tela de Configurações, em vez de oferecer um botão
+      # que levaria a um erro do marketplace.
+      ML_CLIENT_ID: ${ML_CLIENT_ID:-}
+      ML_CLIENT_SECRET: ${ML_CLIENT_SECRET:-}
+      ML_REDIRECT_URI: ${ML_REDIRECT_URI:-http://localhost:8000/api/v1/oauth/mercadolivre/callback}
+      MP_CLIENT_ID: ${MP_CLIENT_ID:-}
+      MP_CLIENT_SECRET: ${MP_CLIENT_SECRET:-}
+      MP_REDIRECT_URI: ${MP_REDIRECT_URI:-http://localhost:8000/api/v1/oauth/mercadopago/callback}
+      MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+      SHOPEE_PARTNER_ID: ${SHOPEE_PARTNER_ID:-}
+      SHOPEE_PARTNER_KEY: ${SHOPEE_PARTNER_KEY:-}
+      SHOPEE_REDIRECT_URI: ${SHOPEE_REDIRECT_URI:-http://localhost:8000/api/v1/oauth/shopee/callback}
+      SHOPEE_API_BASE: ${SHOPEE_API_BASE:-https://partner.shopeemobile.com}
+
+      BACKFILL_DAYS: ${BACKFILL_DAYS:-90}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
     ports: ['8000:8000']
     volumes: ['./backend:/app']
     depends_on:

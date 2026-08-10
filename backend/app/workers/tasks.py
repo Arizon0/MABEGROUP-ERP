@@ -63,15 +63,17 @@ async def sincronizar_pedidos_recentes(_ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 async def sincronizar_catalogo(_ctx: dict[str, Any]) -> dict[str, Any]:
-    """Anúncios, estoque e perguntas (a cada hora)."""
+    """Anúncios, estoque, perguntas, reclamações e campanhas (a cada hora)."""
     async with SessionLocal() as db:
         contas = await sync.contas_ativas(db)
-        total = {"anuncios": 0, "perguntas": 0}
+        total = {"anuncios": 0, "perguntas": 0, "reclamacoes": 0, "campanhas": 0}
         for conta in contas:
             if conta.channel == Canal.MERCADO_PAGO:
                 continue
             total["anuncios"] += (await sync.sincronizar_anuncios(db, conta)).atualizados
             total["perguntas"] += (await sync.sincronizar_perguntas(db, conta)).atualizados
+            total["reclamacoes"] += (await sync.sincronizar_reclamacoes(db, conta)).atualizados
+            total["campanhas"] += (await sync.sincronizar_campanhas(db, conta)).atualizados
         return total
 
 

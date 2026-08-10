@@ -162,6 +162,7 @@ consegue explicar depois.
 | [11 — Roadmap](docs/11-roadmap.md) | Evolução em fases e modelo de negócio |
 | [12 — Análise de dados](docs/12-analise-de-dados.md) | O que a API entrega pronto × o que o sistema calcula |
 | [13 — Instalação](docs/13-instalacao.md) | Passo a passo local e de produção |
+| [14 — Conectar APIs reais](docs/14-conectar-apis-reais.md) | **Do modo simulado às contas reais**, portal por portal |
 
 ---
 
@@ -194,10 +195,17 @@ As setas de dependência apontam sempre para dentro: `api → services → model
 
 ## Conectar contas reais
 
-1. Crie as aplicações nos portais de desenvolvedor (ver [doc 03](docs/03-autenticacao-marketplaces.md)).
-2. Preencha `.env` a partir de `.env.example`.
-3. Defina `USE_MOCK_CONNECTORS=0`.
-4. No painel, **Configurações → Conectar**. A autorização acontece no site do
+Passo a passo completo em **[docs/14-conectar-apis-reais.md](docs/14-conectar-apis-reais.md)**.
+Resumo:
+
+1. Suba um túnel público (`cloudflared tunnel --url http://localhost:8000`) — os
+   marketplaces não alcançam `localhost` para entregar as notificações.
+2. Crie as aplicações nos portais de desenvolvedor, usando a URL do túnel nos
+   campos de redirect e de webhook.
+3. Preencha `.env` e defina `USE_MOCK_CONNECTORS=0`.
+4. `docker compose down -v && docker compose up --build` — o `-v` apaga os dados
+   simulados, que contaminariam os relatórios se misturados ao histórico real.
+5. No painel, **Configurações → Conectar**. A autorização acontece no site do
    próprio marketplace; ao voltar, o backfill de 90 dias começa sozinho.
 
 > **Nota de conformidade:** o sistema usa exclusivamente APIs oficiais

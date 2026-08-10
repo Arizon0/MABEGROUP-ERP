@@ -31,6 +31,7 @@ class Recurso:
     ANUNCIOS = "listings"
     PERGUNTAS = "questions"
     RECLAMACOES = "claims"
+    CAMPANHAS = "campaigns"
     ESCROW = "escrow"
     REPASSES = "settlements"
     REPUTACAO = "reputation"
@@ -278,6 +279,73 @@ async def sincronizar_perguntas(db: AsyncSession, conta: ChannelAccount) -> Resu
     return resultado
 
 
+async def sincronizar_reclamacoes(db: AsyncSession, conta: ChannelAccount) -> ResultadoSync:
+    """Reclamações, mediações e devoluções.
+
+    Alimenta a aba de Atendimento e o diagnóstico de divergência financeira —
+    uma reclamação em aberto costuma explicar um repasse menor que o previsto.
+    """
+    import time
+
+    inicio = time.monotonic()
+    resultado = ResultadoSync(recurso=Recurso.RECLAMACOES, conta_id=conta.id)
+    try:
+        token = await tokens.obter_access_token(db, conta)
+        conector = obter_conector(conta.channel)
+        if not hasattr(conector, "fetch_claims"):
+            return resultado
+        for reclamacao in await conector.fetch_claims(
+            token, shop_id=conta.external_account_id
+        ):
+            await ingest.salvar_reclamacao(db, conta, reclamacao)
+            resultado.atualizados += 1
+        cursor = await obter_cursor(db, conta.id, Recurso.RECLAMACOES)
+        cursor.last_synced_at = datetime.now(UTC)
+        cursor.status = "ok"
+        cursor.consecutive_failures = 0
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        await _registrar_falha(db, conta, Recurso.RECLAMACOES, exc)
+        resultado.erros.append(str(exc)[:400])
+    resultado.duracao_s = time.monotonic() - inicio
+    return resultado
+
+
+async def sincronizar_campanhas(db: AsyncSession, conta: ChannelAccount) -> ResultadoSync:
+    """Campanhas, cupons e promoções ativas.
+
+    Não cobre mídia paga: a Ads API da Shopee exige whitelist separada e o
+    Mercado Livre não expõe custo por campanha de forma consolidada — esse
+    valor entra por lançamento manual (ver ``docs/10-riscos-limitacoes.md``).
+    """
+    import time
+
+    inicio = time.monotonic()
+    resultado = ResultadoSync(recurso=Recurso.CAMPANHAS, conta_id=conta.id)
+    try:
+        token = await tokens.obter_access_token(db, conta)
+        conector = obter_conector(conta.channel)
+        if not hasattr(conector, "fetch_campaigns"):
+            return resultado
+        for campanha in await conector.fetch_campaigns(
+            token, shop_id=conta.external_account_id
+        ):
+            await ingest.salvar_campanha(db, conta, campanha)
+            resultado.atualizados += 1
+        cursor = await obter_cursor(db, conta.id, Recurso.CAMPANHAS)
+        cursor.last_synced_at = datetime.now(UTC)
+        cursor.status = "ok"
+        cursor.consecutive_failures = 0
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        await _registrar_falha(db, conta, Recurso.CAMPANHAS, exc)
+        resultado.erros.append(str(exc)[:400])
+    resultado.duracao_s = time.monotonic() - inicio
+    return resultado
+
+
 async def capturar_reputacao(db: AsyncSession, conta: ChannelAccount) -> None:
     """Fotografa a reputação do dia.
 
@@ -343,11 +411,17 @@ async def capturar_reputacao(db: AsyncSession, conta: ChannelAccount) -> None:
 
 
 async def sincronizar_conta(db: AsyncSession, conta: ChannelAccount) -> list[ResultadoSync]:
-    """Executa a sincronização completa de uma conta (usada no backfill)."""
+    """Sincronização completa de uma conta — todos os módulos disponíveis.
+
+    Cada recurso é independente: uma falha em campanhas não impede a
+    importação dos pedidos, que é o dado crítico.
+    """
     resultados = [await sincronizar_pedidos(db, conta)]
     if conta.channel != Canal.MERCADO_PAGO:
         resultados.append(await sincronizar_anuncios(db, conta))
         resultados.append(await sincronizar_perguntas(db, conta))
+        resultados.append(await sincronizar_reclamacoes(db, conta))
+        resultados.append(await sincronizar_campanhas(db, conta))
         await capturar_reputacao(db, conta)
     return resultados
 

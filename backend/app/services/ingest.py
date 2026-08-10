@@ -19,6 +19,8 @@ from app.connectors.base import (
     CanonicalListing,
     CanonicalOrder,
     CanonicalPayment,
+    CanonicalCampaign,
+    CanonicalClaim,
     CanonicalQuestion,
     CanonicalShipment,
 )
@@ -29,7 +31,8 @@ from app.models.channel import ChannelAccount
 from app.models.enums import StatusPedido
 from app.models.finance import Payment, PaymentFee, Refund
 from app.models.order import Order, OrderEvent, OrderItem, Shipment, ShipmentEvent
-from app.models.support import Question
+from app.models.marketing import Campaign, CampaignItem
+from app.models.support import Claim, Question
 from app.services import finance
 
 log = structlog.get_logger(__name__)
@@ -678,6 +681,126 @@ async def salvar_pergunta(
             )
     await db.flush()
     return pergunta
+
+
+async def salvar_reclamacao(
+    db: AsyncSession, conta: ChannelAccount, canonico: CanonicalClaim
+) -> Claim:
+    """UPSERT de reclamação, mediação ou devolução."""
+    reclamacao = await db.scalar(
+        select(Claim).where(
+            Claim.channel_account_id == conta.id, Claim.external_id == canonico.external_id
+        )
+    )
+    criado = reclamacao is None
+    reclamacao = reclamacao or Claim(
+        tenant_id=conta.tenant_id,
+        channel_account_id=conta.id,
+        channel=conta.channel,
+        external_id=canonico.external_id,
+        opened_at=_aware(canonico.opened_at) or datetime.now(UTC),
+    )
+
+    if canonico.external_order_id:
+        pedido = await db.scalar(
+            select(Order).where(
+                Order.channel_account_id == conta.id,
+                Order.external_id == canonico.external_order_id,
+            )
+        )
+        if pedido:
+            reclamacao.order_id = pedido.id
+
+    reclamacao.type = canonico.type
+    reclamacao.stage = canonico.stage
+    reclamacao.status = canonico.status
+    reclamacao.reason_code = canonico.reason_code
+    reclamacao.reason_text = canonico.reason_text
+    reclamacao.resolution = canonico.resolution
+    reclamacao.amount_involved = canonico.amount_involved
+    reclamacao.closed_at = _aware(canonico.closed_at)
+    reclamacao.raw = canonico.raw or {}
+
+    if criado:
+        db.add(reclamacao)
+        await db.flush()
+        await bus.publicar(
+            bus.TipoEvento.RECLAMACAO_ABERTA,
+            conta.tenant_id,
+            {
+                "claim_id": reclamacao.id,
+                "order_id": reclamacao.order_id,
+                "type": reclamacao.type,
+                "status": reclamacao.status,
+            },
+            channel=conta.channel,
+            account_id=conta.id,
+        )
+    await db.flush()
+    return reclamacao
+
+
+async def salvar_campanha(
+    db: AsyncSession, conta: ChannelAccount, canonico: CanonicalCampaign
+) -> Campaign:
+    """UPSERT de campanha e dos anúncios participantes."""
+    campanha = await db.scalar(
+        select(Campaign).where(
+            Campaign.channel_account_id == conta.id,
+            Campaign.external_id == canonico.external_id,
+        )
+    )
+    criado = campanha is None
+    campanha = campanha or Campaign(
+        tenant_id=conta.tenant_id,
+        channel_account_id=conta.id,
+        channel=conta.channel,
+        external_id=canonico.external_id,
+    )
+
+    campanha.name = canonico.name
+    campanha.type = canonico.type
+    campanha.status = canonico.status
+    campanha.start_at = _aware(canonico.start_at)
+    campanha.end_at = _aware(canonico.end_at)
+    campanha.budget = canonico.budget
+    campanha.raw = canonico.raw or {}
+
+    if criado:
+        db.add(campanha)
+    await db.flush()
+
+    # Os itens são regravados: o vendedor adiciona e remove produtos de uma
+    # promoção em andamento, e um merge deixaria participante fantasma.
+    for antigo in (
+        await db.execute(select(CampaignItem).where(CampaignItem.campaign_id == campanha.id))
+    ).scalars():
+        await db.delete(antigo)
+    await db.flush()
+
+    for item in canonico.items or []:
+        externo = str(item.get("item_id") or item.get("id") or "")
+        if not externo:
+            continue
+        anuncio = await db.scalar(
+            select(Listing).where(
+                Listing.channel_account_id == conta.id, Listing.external_id == externo
+            )
+        )
+        db.add(
+            CampaignItem(
+                tenant_id=conta.tenant_id,
+                campaign_id=campanha.id,
+                listing_id=anuncio.id if anuncio else None,
+                external_listing_id=externo,
+                original_price=Decimal(str(item.get("original_price") or 0)),
+                promo_price=Decimal(str(item.get("promotion_price") or item.get("promo_price") or 0)),
+                stock_limit=int(item.get("promotion_stock") or item.get("stock") or 0),
+            )
+        )
+
+    await db.flush()
+    return campanha
 
 
 # --- Auxiliares --------------------------------------------------------------

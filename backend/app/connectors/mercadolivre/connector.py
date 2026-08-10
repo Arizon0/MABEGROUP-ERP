@@ -129,6 +129,12 @@ class ConectorMercadoLivre:
         )
 
     # --- Pedidos ------------------------------------------------------------
+    # Todas as assinaturas de busca aceitam argumentos extras: o serviço de
+    # sincronização é genérico e passa `seller_id` e `shop_id` para qualquer
+    # canal, sem saber qual dos dois aquele marketplace usa. Sem o `**_`, a
+    # chamada quebraria com TypeError — e só com credenciais reais, porque os
+    # conectores simulados já aceitavam tudo.
+
 
     async def fetch_orders(
         self,
@@ -179,7 +185,9 @@ class ConectorMercadoLivre:
         dados = await self._api().get(f"/orders/{external_id}", token=token)
         return norm.normalizar_pedido(dados) if dados else None
 
-    async def fetch_shipment(self, token: str, external_id: str) -> CanonicalShipment | None:
+    async def fetch_shipment(
+        self, token: str, external_id: str, **_: Any
+    ) -> CanonicalShipment | None:
         """Busca o envio junto dos custos reais.
 
         A chamada a ``/costs`` é separada e obrigatória: sem ela não há como
@@ -198,13 +206,17 @@ class ConectorMercadoLivre:
             log.debug("custos_envio_indisponiveis", envio=external_id)
         return norm.normalizar_envio(dados, custos)
 
-    async def fetch_payment(self, token: str, external_id: str) -> CanonicalPayment | None:
+    async def fetch_payment(
+        self, token: str, external_id: str, **_: Any
+    ) -> CanonicalPayment | None:
         dados = await self._api().get(f"/v1/payments/{external_id}", token=token)
         return norm.normalizar_pagamento(dados) if dados else None
 
     # --- Catálogo -----------------------------------------------------------
 
-    async def fetch_listings(self, token: str, seller_id: str) -> list[CanonicalListing]:
+    async def fetch_listings(
+        self, token: str, seller_id: str = "", **_: Any
+    ) -> list[CanonicalListing]:
         """Lista os anúncios do vendedor usando ``scroll`` e multiget."""
         api = self._api(chave_limite=f"ml:{seller_id}")
         ids: list[str] = []
@@ -231,7 +243,9 @@ class ConectorMercadoLivre:
                     anuncios.append(norm.normalizar_anuncio(corpo))
         return anuncios
 
-    async def fetch_questions(self, token: str, seller_id: str) -> list[CanonicalQuestion]:
+    async def fetch_questions(
+        self, token: str, seller_id: str = "", **_: Any
+    ) -> list[CanonicalQuestion]:
         resposta = await self._api().get(
             "/questions/search",
             token=token,
@@ -239,11 +253,13 @@ class ConectorMercadoLivre:
         )
         return [norm.normalizar_pergunta(q) for q in (resposta or {}).get("questions") or []]
 
-    async def fetch_claims(self, token: str) -> list[CanonicalClaim]:
+    async def fetch_claims(self, token: str, **_: Any) -> list[CanonicalClaim]:
         resposta = await self._api().get("/post-purchase/v1/claims/search", token=token)
         return [norm.normalizar_reclamacao(c) for c in (resposta or {}).get("data") or []]
 
-    async def fetch_seller_reputation(self, token: str, seller_id: str) -> dict[str, Any]:
+    async def fetch_seller_reputation(
+        self, token: str, seller_id: str = "", **_: Any
+    ) -> dict[str, Any]:
         """Reputação atual — fotografada diariamente em ``metrics_snapshots``.
 
         A API só devolve o estado de agora; o histórico não existe do lado deles.
