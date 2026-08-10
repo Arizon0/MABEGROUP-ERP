@@ -6,6 +6,7 @@ import type {
   Anuncio,
   Cascata,
   Conta,
+  ContasAReceber,
   Despesa,
   Divergencia,
   DRE,
@@ -20,6 +21,7 @@ import type {
   Pulso,
   RegraImposto,
   ResumoCanal,
+  ResumoTributario,
   SaudeEstoque,
   Usuario,
   VisaoGeral,
@@ -444,4 +446,29 @@ export const useMapeamentos = () =>
 export const useCustoDeMidia = () =>
   useMutacaoDeCusto<{ id: number; manual_media_cost: string }>(({ id, ...dados }) =>
     api(`/marketing/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(dados) }),
+  )
+
+export const useResumoTributario = (f: Filtros) =>
+  useQuery({
+    queryKey: ['tax-summary', f],
+    queryFn: () => api<ResumoTributario>('/costs/tax-summary', { params: f }),
+    ...PADRAO,
+  })
+
+export const useContasAReceber = () =>
+  useQuery({
+    queryKey: ['receivables'],
+    queryFn: () => api<ContasAReceber>('/finance/receivables'),
+    ...PADRAO,
+  })
+
+export const useRatearFrete = () =>
+  useMutacaoDeCusto<{
+    frete_total: string
+    outros_custos?: string
+    criterio: 'quantidade' | 'valor'
+    aplicar: boolean
+    itens: { sku: string; quantidade: string; valor_total?: string }[]
+  }>((dados) =>
+    api('/catalog/products/freight-in', { method: 'POST', body: JSON.stringify(dados) }),
   )

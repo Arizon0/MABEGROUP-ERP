@@ -207,11 +207,12 @@ async def _sincronizar_itens(
             custo = custo_anterior
         elif produto_id:
             produto = await db.get(Product, produto_id)
-            # Embalagem entra no custo unitário: em item de baixo valor, ela é
-            # a diferença entre margem positiva e negativa.
-            custo = (
-                (produto.unit_cost + produto.packaging_cost) if produto else ZERO
-            )
+            # Custo posto no galpão (fornecedor + frete de compra + outros
+            # custos de aquisição) mais a embalagem do envio. Deixar o frete de
+            # compra de fora subestima o CMV justamente nos itens pesados, e a
+            # embalagem, em item de baixo valor, é a diferença entre margem
+            # positiva e negativa.
+            custo = produto.custo_total_unitario if produto else ZERO
         else:
             custo = ZERO
 

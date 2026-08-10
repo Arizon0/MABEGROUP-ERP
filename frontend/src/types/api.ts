@@ -195,7 +195,11 @@ export interface Produto {
   name: string
   brand: string
   unit_cost: string
+  freight_in_cost: string
+  other_acquisition_cost: string
   packaging_cost: string
+  custo_aquisicao: string
+  custo_total_unitario: string
   is_active: boolean
 }
 
@@ -231,11 +235,21 @@ export interface Filtros {
 
 // --- Custos, impostos e DRE --------------------------------------------------
 
+export interface Faixa {
+  id?: number
+  rbt12_ate: string
+  aliquota_nominal_pct: string
+  parcela_deduzir: string
+}
+
 export interface RegraImposto {
   id: number
   name: string
   kind: string
   rate_pct: string
+  regime: 'fixed' | 'simples_progressive'
+  annex: string
+  brackets: Faixa[]
   base: 'gross_revenue' | 'gross_plus_shipping' | 'net_revenue' | string
   channel: string
   valid_from: string
@@ -296,4 +310,39 @@ export interface MesDRE {
   lucro_operacional: string
   lucro_pct: string
   pedidos: number
+}
+
+export interface ResumoTributario {
+  aliquota_efetiva_pct: string
+  rbt12: {
+    acumulado: string
+    meses_de_historico: number
+    proporcionalizada: string
+    observacao: string
+  }
+  regras_vigentes: {
+    id: number
+    name: string
+    regime: string
+    annex: string
+    base: string
+    aliquota_aplicada_pct: string
+    rbt12: string | null
+    excedeu_teto_do_simples: boolean
+  }[]
+  soma_aliquotas_pct: string
+  alerta: string
+}
+
+export interface ContasAReceber {
+  resumo: { total_a_receber: string; total_ja_liberado: string; atualizado_em: string }
+  por_faixa: Record<string, string>
+  por_provedor: {
+    provedor: string
+    pendente: string
+    liberado: string
+    pagamentos: number
+    contas: number
+  }[]
+  observacao: string
 }

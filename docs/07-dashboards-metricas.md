@@ -98,8 +98,20 @@ Visão consolidada por SKU base — o mesmo produto vendido em 4 anúncios de 2 
 aparece como uma linha só, que é justamente o que o painel nativo de cada
 marketplace não consegue mostrar.
 
-**Cadastro de produtos internos** com custo unitário e custo de embalagem —
-os dois compõem o CMV, congelado na data da venda. Criar, editar e excluir;
+**Cadastro de produtos internos** com o **custo de aquisição** completo — preço
+do fornecedor, **frete de compra** (transporte até o galpão), outros custos de
+aquisição (seguro, desembaraço, ICMS-ST não recuperável) e embalagem. O frete de
+compra integra contabilmente o custo do estoque, não é despesa do mês: deixá-lo
+de fora subestima o CMV justamente nos itens pesados, que são os que mais custam
+para trazer. Tudo congelado na data da venda.
+
+**Rateio do frete da nota.** O frete chega como valor único na nota do
+fornecedor, mas o custo é por unidade. O rateio distribui por **quantidade**
+(itens de porte parecido) ou por **valor** (nota com preços muito diferentes),
+com simulação antes de aplicar. O critério ideal seria peso ou cubagem, que é o
+que a transportadora cobra, mas nenhum dos dois costuma estar na nota por item —
+e inventar um critério que o vendedor não consegue conferir seria pior que
+oferecer os dois que ele consegue. Criar, editar e excluir;
 produto com venda registrada é **desativado em vez de apagado**, para que o
 histórico de margem continue consultável. Alerta de produtos sem custo, porque
 custo zero faz a margem daquele item aparecer maior do que é.
@@ -160,12 +172,45 @@ pela de hoje. Sem isso, subir de faixa no Simples reescreveria retroativamente o
 lucro de todos os meses anteriores. Base de cálculo configurável (receita bruta,
 bruta + frete, ou líquida) e regra opcional por canal.
 
+**Simples Nacional progressivo.** A alíquota do Simples não é um número fixo: é
+função da receita bruta acumulada dos 12 meses anteriores (RBT12), pela fórmula
+do art. 18 da LC 123/2006:
+
+```
+alíquota efetiva = (RBT12 × alíquota nominal − parcela a deduzir) ÷ RBT12
+```
+
+A parcela a deduzir é o que torna a tabela progressiva de fato — sem ela, cruzar
+o teto de uma faixa faria o imposto saltar de degrau, e faturar R$ 1 a mais
+poderia custar milhares em tributo. A alíquota é resolvida **uma vez por mês**,
+não por pedido: dois pedidos do mesmo mês são sempre tributados igual, e a RBT12
+aparece ao lado da alíquota para que a apuração seja conferível.
+
+As faixas ficam **no banco, editáveis**, não no código. A tabela muda por lei
+complementar e quem a confere é o contador do vendedor; uma tabela compilada que
+ninguém revisa erraria toda apuração em silêncio. O sistema conhece a *fórmula* —
+os números são dado.
+
+Dois casos de borda tratados explicitamente: empresa com **menos de 12 meses de
+operação** tem a receita proporcionalizada (média dos meses × 12, regra de início
+de atividade), sem o que um negócio novo ficaria preso na faixa mais baixa; e
+faturamento **acima do teto da última faixa** dispara alerta, porque no Simples
+isso desenquadra a empresa em vez de simplesmente somar mais uma faixa.
+
 **Despesas operacionais por competência.** Aluguel, pró-labore, contador e
 software entram no mês a que se referem, não no mês em que foram pagos, e ficam
 **fora do pedido** de propósito: ratear despesa fixa por venda produziria um
 "custo por pedido" que muda conforme o volume do mês, o que não ajuda ninguém a
 decidir preço. Despesas marcadas como recorrentes podem ser replicadas para o
 mês seguinte com um clique.
+
+**Saldo a receber consolidado.** Quanto ainda vai cair na conta, somando
+Mercado Pago e Shopee a partir de `money_release_date` e `escrow_release_time`.
+Diferente do fluxo de caixa, não se limita a uma janela de datas: pagamento sem
+data prevista aparece em faixa própria, porque é justamente o que some de um
+calendário e some do controle. Valor com data de liberação já vencida e status
+ainda pendente é destacado — ou o repasse atrasou, ou o webhook de liberação não
+chegou, e nos dois casos é o primeiro valor a investigar.
 
 **Indicadores:** margem de contribuição (R$ e %), lucro operacional (R$ e %),
 lucro por pedido, ticket médio, carga tributária efetiva, taxa efetiva do canal

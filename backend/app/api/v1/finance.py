@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from app.core.deps import AnalistaDep, CtxDep, DbDep
-from app.models.enums import FonteLiquido, StatusPedido
+from app.models.enums import FonteLiquido, StatusPagamento, StatusPedido
 from app.models.finance import Payment, PaymentFee, Settlement
 from app.models.order import Order
 from app.services import analytics, reconciliation
@@ -270,3 +270,116 @@ async def repasses(
         }
         for r in resultado.scalars()
     ]
+
+
+@router.get(
+    "/receivables",
+    summary="Saldo a receber consolidado (Mercado Pago + Shopee)",
+    description=(
+        "Quanto ainda vai cair na conta, somando todos os canais. Diferente do "
+        "fluxo de caixa, não se limita a uma janela de datas: pagamento sem "
+        "data de liberação prevista também aparece, separado, porque é "
+        "justamente o que some de um calendário e some do controle."
+    ),
+)
+async def contas_a_receber(ctx: CtxDep, db: DbDep) -> dict[str, Any]:
+    """Saldo a receber por canal, com idade do valor pendente.
+
+    O Mercado Pago e a Shopee informam por pagamento quando o dinheiro é
+    liberado (``money_release_date`` / ``escrow_release_time``). Somar isso é o
+    que responde "quanto tenho a receber" — pergunta que nenhum painel nativo
+    responde de forma consolidada entre canais, porque cada um só enxerga a si
+    mesmo.
+
+    Valores **liberados** ficam de fora do saldo: já entraram na conta.
+    """
+    hoje = datetime.now(UTC)
+
+    linhas = (
+        await db.execute(
+            select(
+                Payment.channel_account_id,
+                Payment.provider,
+                Payment.money_release_status,
+                Payment.money_release_date,
+                func.coalesce(func.sum(Payment.net_received_amount), 0),
+                func.count(Payment.id),
+            )
+            .where(
+                Payment.tenant_id == ctx.tenant_id,
+                Payment.status == StatusPagamento.APROVADO,
+            )
+            .group_by(
+                Payment.channel_account_id,
+                Payment.provider,
+                Payment.money_release_status,
+                Payment.money_release_date,
+            )
+        )
+    ).all()
+
+    por_provedor: dict[str, dict[str, Any]] = {}
+    faixas = {"vencido": Decimal("0"), "ate_7_dias": Decimal("0"),
+              "ate_30_dias": Decimal("0"), "acima_de_30": Decimal("0"),
+              "sem_previsao": Decimal("0")}
+    total_pendente = Decimal("0")
+    total_liberado = Decimal("0")
+
+    for conta_id, provedor, situacao, liberacao, valor, qtd in linhas:
+        montante = Decimal(str(valor or 0))
+        bucket = por_provedor.setdefault(
+            provedor or "desconhecido",
+            {"provedor": provedor or "desconhecido", "pendente": Decimal("0"),
+             "liberado": Decimal("0"), "pagamentos": 0, "contas": set()},
+        )
+        bucket["pagamentos"] += int(qtd or 0)
+        bucket["contas"].add(conta_id)
+
+        if situacao == "released":
+            bucket["liberado"] += montante
+            total_liberado += montante
+            continue
+
+        bucket["pendente"] += montante
+        total_pendente += montante
+
+        if liberacao is None:
+            faixas["sem_previsao"] += montante
+        else:
+            dias = (liberacao - hoje).days
+            if dias < 0:
+                # Data de liberação no passado e status ainda pendente: ou o
+                # repasse atrasou, ou o webhook de liberação não chegou. Nos
+                # dois casos é o valor que precisa ser investigado primeiro.
+                faixas["vencido"] += montante
+            elif dias <= 7:
+                faixas["ate_7_dias"] += montante
+            elif dias <= 30:
+                faixas["ate_30_dias"] += montante
+            else:
+                faixas["acima_de_30"] += montante
+
+    return {
+        "resumo": {
+            "total_a_receber": str(arredondar(total_pendente)),
+            "total_ja_liberado": str(arredondar(total_liberado)),
+            "atualizado_em": hoje,
+        },
+        "por_faixa": {chave: str(arredondar(v)) for chave, v in faixas.items()},
+        "por_provedor": [
+            {
+                "provedor": b["provedor"],
+                "pendente": str(arredondar(b["pendente"])),
+                "liberado": str(arredondar(b["liberado"])),
+                "pagamentos": b["pagamentos"],
+                "contas": len(b["contas"]),
+            }
+            for b in sorted(
+                por_provedor.values(), key=lambda x: x["pendente"], reverse=True
+            )
+        ],
+        "observacao": (
+            "Valor pendente é o líquido já descontado das taxas do canal. O "
+            "imposto do regime do vendedor ainda será recolhido sobre ele."
+        ),
+    }

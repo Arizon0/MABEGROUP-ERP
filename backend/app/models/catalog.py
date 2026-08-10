@@ -42,10 +42,38 @@ class Product(Base, TimestampMixin):
     category: Mapped[str] = mapped_column(String(160), default="")
     #: Custo atual. O custo usado numa venda é congelado em ``order_items``.
     unit_cost: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Frete de **compra**: o transporte do fornecedor até o galpão, rateado por
+    #: unidade. Contabilmente integra o custo de aquisição do estoque, não é
+    #: despesa do mês — deixá-lo de fora subestima o CMV e infla o lucro
+    #: exatamente nos itens pesados, que são os que mais custam para trazer.
+    freight_in_cost: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Outros custos de aquisição rateados por unidade: seguro de carga,
+    #: desembaraço, ICMS-ST não recuperável.
+    other_acquisition_cost: Mapped[Decimal] = mapped_column(
+        default=Decimal("0"), nullable=False
+    )
     #: Embalagem e material de envio por unidade. Entra no CMV junto do custo do
     #: produto — em item de baixo valor costuma ser a diferença entre margem
     #: positiva e negativa.
     packaging_cost: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+
+    @property
+    def custo_aquisicao(self) -> Decimal:
+        """Custo posto no galpão: o que a mercadoria custou até estar disponível.
+
+        É o custo de aquisição no sentido contábil — preço do fornecedor mais
+        os gastos necessários para trazer o item até o estoque.
+        """
+        return (
+            Decimal(str(self.unit_cost or 0))
+            + Decimal(str(self.freight_in_cost or 0))
+            + Decimal(str(self.other_acquisition_cost or 0))
+        )
+
+    @property
+    def custo_total_unitario(self) -> Decimal:
+        """Custo de aquisição mais embalagem — o que entra no CMV da venda."""
+        return self.custo_aquisicao + Decimal(str(self.packaging_cost or 0))
     ncm: Mapped[str] = mapped_column(String(20), default="")
     ean: Mapped[str] = mapped_column(String(20), default="")
     weight_grams: Mapped[int] = mapped_column(Integer, default=0)

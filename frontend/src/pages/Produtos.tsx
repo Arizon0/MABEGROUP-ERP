@@ -7,6 +7,7 @@ import {
   useMapearSku,
   usePendencias,
   useProdutos,
+  useRatearFrete,
   useRemoverProduto,
   useSalvarProduto,
   useSaudeEstoque,
@@ -187,6 +188,7 @@ export function Produtos() {
       </Secao>
 
       <CadastroDeProdutos />
+      <RateioDeFrete />
       <MapeamentosConfigurados />
     </div>
   )
@@ -200,6 +202,8 @@ const PRODUTO_VAZIO = {
   brand: '',
   category: '',
   unit_cost: '',
+  freight_in_cost: '',
+  other_acquisition_cost: '',
   packaging_cost: '',
   ncm: '',
   ean: '',
@@ -243,19 +247,25 @@ function CadastroDeProdutos() {
           descricao="O produto interno é o que liga os SKUs dos canais a um custo único."
         />
       ) : (
-        <Tabela colunas={['SKU', 'Produto', 'Marca', 'Custo', 'Embalagem', 'Custo total', 'Situação', '']}>
+        <Tabela
+          colunas={[
+            'SKU', 'Produto', 'Fornecedor', 'Frete compra', 'Aquisição',
+            'Embalagem', 'Custo total', 'Situação', '',
+          ]}
+        >
           {(produtos.data ?? []).map((p: Produto) => (
             <tr key={p.id} className="hover:bg-surface-raised">
               <td className="td num font-medium">{p.sku}</td>
-              <td className="td max-w-[260px] truncate">{p.name}</td>
-              <td className="td text-xs">{p.brand || '—'}</td>
+              <td className="td max-w-[220px] truncate">{p.name}</td>
               <td className={`td num ${Number(p.unit_cost) <= 0 ? 'text-warn' : ''}`}>
                 {brl(p.unit_cost)}
               </td>
-              <td className="td num">{brl(p.packaging_cost)}</td>
-              <td className="td num font-medium">
-                {brl(Number(p.unit_cost) + Number(p.packaging_cost))}
+              <td className={`td num ${Number(p.freight_in_cost) <= 0 ? 'text-ink-muted' : ''}`}>
+                {brl(p.freight_in_cost)}
               </td>
+              <td className="td num">{brl(p.custo_aquisicao)}</td>
+              <td className="td num">{brl(p.packaging_cost)}</td>
+              <td className="td num font-medium">{brl(p.custo_total_unitario)}</td>
               <td className="td text-xs">
                 {p.is_active ? (
                   <span className="text-good">Ativo</span>
@@ -276,6 +286,8 @@ function CadastroDeProdutos() {
                         brand: p.brand,
                         category: '',
                         unit_cost: p.unit_cost,
+                        freight_in_cost: p.freight_in_cost,
+                        other_acquisition_cost: p.other_acquisition_cost,
                         packaging_cost: p.packaging_cost,
                         ncm: '',
                         ean: '',
@@ -316,6 +328,8 @@ function CadastroDeProdutos() {
                 {
                   ...edicao,
                   unit_cost: edicao.unit_cost || '0',
+                  freight_in_cost: edicao.freight_in_cost || '0',
+                  other_acquisition_cost: edicao.other_acquisition_cost || '0',
                   packaging_cost: edicao.packaging_cost || '0',
                 },
                 { onSuccess: () => setEdicao(null) },
@@ -357,6 +371,36 @@ function CadastroDeProdutos() {
                   onChange={(e) => setEdicao({ ...edicao, unit_cost: e.target.value })}
                 />
               </Campo>
+              <Campo
+                rotulo="Frete de compra (R$)"
+                dica="Transporte do fornecedor até o galpão, por unidade. Use o rateio abaixo para calcular a partir do frete total da nota."
+              >
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  className="input"
+                  value={edicao.freight_in_cost}
+                  onChange={(e) => setEdicao({ ...edicao, freight_in_cost: e.target.value })}
+                />
+              </Campo>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo
+                rotulo="Outros custos de aquisição (R$)"
+                dica="Seguro de carga, desembaraço, ICMS-ST não recuperável."
+              >
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  className="input"
+                  value={edicao.other_acquisition_cost}
+                  onChange={(e) =>
+                    setEdicao({ ...edicao, other_acquisition_cost: e.target.value })
+                  }
+                />
+              </Campo>
               <Campo rotulo="Embalagem (R$)" dica="Caixa, plástico e etiqueta por unidade.">
                 <input
                   type="number"
@@ -368,6 +412,18 @@ function CadastroDeProdutos() {
                 />
               </Campo>
             </div>
+            <p className="rounded-lg border border-line bg-surface-raised p-2 text-[11px] text-ink-muted">
+              Custo total no CMV:{' '}
+              <span className="num font-medium text-ink">
+                {brl(
+                  Number(edicao.unit_cost || 0) +
+                    Number(edicao.freight_in_cost || 0) +
+                    Number(edicao.other_acquisition_cost || 0) +
+                    Number(edicao.packaging_cost || 0),
+                )}
+              </span>{' '}
+              — congelado na venda; alterar aqui não muda a margem já registrada.
+            </p>
             {salvar.isError && <ErroBox erro={salvar.error} />}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" className="btn text-xs" onClick={() => setEdicao(null)}>
@@ -380,6 +436,198 @@ function CadastroDeProdutos() {
           </form>
         )}
       </Modal>
+    </Secao>
+  )
+}
+
+// --- Frete de compra ---------------------------------------------------------
+
+type LinhaDaNota = { sku: string; quantidade: string; valor_total: string }
+
+function RateioDeFrete() {
+  const produtos = useProdutos()
+  const ratear = useRatearFrete()
+
+  const [freteTotal, setFreteTotal] = useState('')
+  const [outros, setOutros] = useState('')
+  const [criterio, setCriterio] = useState<'quantidade' | 'valor'>('quantidade')
+  const [linhas, setLinhas] = useState<LinhaDaNota[]>([
+    { sku: '', quantidade: '', valor_total: '' },
+  ])
+  const [previa, setPrevia] = useState<Record<string, string> | null>(null)
+
+  const validas = linhas.filter((l) => l.sku && Number(l.quantidade) > 0)
+
+  const enviar = (aplicar: boolean) => {
+    ratear.mutate(
+      {
+        frete_total: freteTotal || '0',
+        outros_custos: outros || '0',
+        criterio,
+        aplicar,
+        itens: validas.map((l) => ({
+          sku: l.sku,
+          quantidade: l.quantidade,
+          valor_total: l.valor_total || '0',
+        })),
+      },
+      {
+        onSuccess: (resposta) => {
+          const dados = (resposta as { dados?: { itens?: { sku: string; frete_por_unidade: string }[] } })
+            .dados
+          setPrevia(
+            Object.fromEntries(
+              (dados?.itens ?? []).map((i) => [i.sku, i.frete_por_unidade]),
+            ),
+          )
+          if (aplicar) setLinhas([{ sku: '', quantidade: '', valor_total: '' }])
+        },
+      },
+    )
+  }
+
+  return (
+    <Secao
+      titulo="Frete de compra — rateio da nota do fornecedor"
+      descricao="O frete chega como um valor único na nota, mas o custo é por unidade. Contabilmente ele integra o custo de aquisição do estoque: fora do CMV, o lucro aparece maior do que é."
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Campo rotulo="Frete total da nota (R$)">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="input"
+            value={freteTotal}
+            onChange={(e) => setFreteTotal(e.target.value)}
+          />
+        </Campo>
+        <Campo rotulo="Outros custos (R$)" dica="Seguro, desembaraço, ICMS-ST.">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="input"
+            value={outros}
+            onChange={(e) => setOutros(e.target.value)}
+          />
+        </Campo>
+        <Campo
+          rotulo="Critério de rateio"
+          dica={
+            criterio === 'quantidade'
+              ? 'Divide igualmente por unidade — bom quando os itens têm porte parecido.'
+              : 'Proporcional ao valor da linha — evita que a peça barata receba a mesma parcela da cara.'
+          }
+        >
+          <select
+            className="input"
+            value={criterio}
+            onChange={(e) => setCriterio(e.target.value as 'quantidade' | 'valor')}
+          >
+            <option value="quantidade">Por quantidade</option>
+            <option value="valor">Por valor</option>
+          </select>
+        </Campo>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {linhas.map((linha, indice) => (
+          <div key={indice} className="grid gap-2 sm:grid-cols-[2fr,1fr,1fr,auto]">
+            <select
+              className="input py-1 text-xs"
+              value={linha.sku}
+              onChange={(e) => {
+                const copia = [...linhas]
+                copia[indice] = { ...linha, sku: e.target.value }
+                setLinhas(copia)
+              }}
+            >
+              <option value="">Produto…</option>
+              {(produtos.data ?? []).map((p) => (
+                <option key={p.id} value={p.sku}>
+                  {p.sku} — {p.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="0"
+              placeholder="Quantidade"
+              className="input py-1 text-xs"
+              value={linha.quantidade}
+              onChange={(e) => {
+                const copia = [...linhas]
+                copia[indice] = { ...linha, quantidade: e.target.value }
+                setLinhas(copia)
+              }}
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder={criterio === 'valor' ? 'Valor da linha' : 'Valor (opcional)'}
+              className="input py-1 text-xs"
+              value={linha.valor_total}
+              onChange={(e) => {
+                const copia = [...linhas]
+                copia[indice] = { ...linha, valor_total: e.target.value }
+                setLinhas(copia)
+              }}
+            />
+            <div className="flex items-center gap-2">
+              {previa?.[linha.sku] && (
+                <span className="num text-xs text-good" title="Frete por unidade">
+                  {brl(previa[linha.sku])}/un
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn px-2 py-1 text-xs"
+                onClick={() => setLinhas(linhas.filter((_, i) => i !== indice))}
+                disabled={linhas.length === 1}
+                aria-label="Remover linha"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {ratear.isError && (
+        <div className="mt-3">
+          <ErroBox erro={ratear.error} />
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          className="btn text-xs"
+          onClick={() =>
+            setLinhas([...linhas, { sku: '', quantidade: '', valor_total: '' }])
+          }
+        >
+          Adicionar item
+        </button>
+        <button
+          type="button"
+          className="btn text-xs"
+          disabled={validas.length === 0 || ratear.isPending}
+          onClick={() => enviar(false)}
+        >
+          Simular
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary text-xs"
+          disabled={validas.length === 0 || ratear.isPending}
+          onClick={() => enviar(true)}
+        >
+          {ratear.isPending ? 'Aplicando…' : 'Aplicar aos produtos'}
+        </button>
+      </div>
     </Secao>
   )
 }

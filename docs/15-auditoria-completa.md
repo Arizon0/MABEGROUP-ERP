@@ -12,12 +12,12 @@ nada.
 
 | Dimensão | Situação |
 |---|---|
-| Testes automatizados | **177 passando**, 13 pulados (métodos que um canal genuinamente não implementa) |
-| Endpoints REST | 82 — sendo 31 de escrita |
+| Testes automatizados | **197 passando**, 13 pulados (métodos que um canal genuinamente não implementa) |
+| Endpoints REST | 84 — sendo 33 de escrita |
 | Tabelas | 42, sem divergência entre modelos e migrations |
 | Abas do painel | 11 |
 | Build do frontend | Limpo (`tsc --noEmit` + `vite build`), 17 testes passando |
-| Defeitos encontrados nesta auditoria | 5 — todos corrigidos |
+| Defeitos encontrados nesta auditoria | 8 — todos corrigidos |
 
 Os 13 testes pulados não são cobertura faltante: o contrato de conectores
 percorre todos os métodos de todos os canais e pula o que não existe naquele
@@ -108,6 +108,40 @@ Duas representações do mesmo valor quebram comparação no cliente.
 casas. Precisão real acima de centavos — custo unitário de peça, alíquota
 fracionária — é preservada, porque só os zeros irrelevantes somem.
 
+### 6. Simples Nacional aplicado como alíquota fixa
+
+**Gravidade: alta.** A regra tributária multiplicava a receita por um percentual
+único. O Simples não funciona assim: a alíquota é função da receita bruta
+acumulada dos 12 meses anteriores (RBT12), pela fórmula do art. 18 da
+LC 123/2006 — `(RBT12 × nominal − parcela a deduzir) ÷ RBT12`. Uma alíquota fixa
+erra sempre que o faturamento cruza faixa, e erra para os dois lados.
+
+**Correção.** Regime progressivo com faixas **editáveis no banco**, resolvido uma
+vez por mês (não por pedido, para que dois pedidos do mesmo mês nunca saiam com
+alíquotas diferentes). A RBT12 é exibida ao lado da alíquota, porque sem ela a
+apuração vira um número que o contador teria de aceitar por fé. Tratados também:
+proporcionalização para empresa com menos de 12 meses, e alerta de
+desenquadramento quando a receita passa do teto da tabela.
+
+### 7. Frete do fornecedor até o galpão não existia
+
+**Gravidade: alta.** O custo do produto era apenas o preço pago ao fornecedor. O
+frete de compra — que contabilmente **integra o custo de aquisição do estoque**,
+não é despesa do mês — não tinha onde ser lançado. O CMV saía subestimado e o
+lucro inflado, com o erro concentrado justamente nos itens pesados, que são os
+que mais custam para trazer.
+
+**Correção.** `freight_in_cost` e `other_acquisition_cost` no produto, ambos no
+CMV congelado da venda, e um endpoint de **rateio do frete da nota** por
+quantidade ou por valor, com simulação antes de aplicar.
+
+### 8. CMV divergente entre ingestão e remapeamento de SKU
+
+**Gravidade: média.** Ao vincular um SKU pendente a um produto, o recálculo usava
+só `unit_cost`, enquanto a ingestão usava custo mais embalagem. O mesmo pedido
+saía com CMV diferente conforme tivesse sido mapeado antes ou depois da
+importação. Corrigido para usar o mesmo custo nos dois caminhos.
+
 ---
 
 ## 15.3 Cálculos financeiros verificados
@@ -127,8 +161,8 @@ Receita bruta de vendas
 (+) Descontos e bônus do canal
 (±) Ajustes não discriminados pelo canal
 (=) Líquido recebido dos canais          ← informado pelo canal
-(−) Imposto sobre vendas                 ← regime do vendedor
-(−) CMV (produto + embalagem)            ← congelado na data da venda
+(−) Imposto sobre vendas                 ← Simples progressivo por RBT12
+(−) CMV (aquisição + frete de compra + embalagem)  ← congelado na venda
 (=) Margem de contribuição
 (−) Despesas operacionais
 (=) Lucro operacional                    ← o lucro real
@@ -149,6 +183,11 @@ Receita bruta de vendas
 | Devolução reduz a base tributável | Idem, proporcionalmente |
 | Regra escolhida pela data da venda | Mudança de faixa não reescreve o passado |
 | Custo congelado na venda | Alterar o custo hoje não pode alterar a margem histórica |
+| Sem salto de degrau ao cruzar faixa do Simples | R$ 1 a mais de faturamento não pode custar milhares em tributo |
+| Alíquota efetiva cresce com o faturamento | Monotonicidade da tabela progressiva |
+| RBT12 exclui o mês corrente | Incluir faria a alíquota mudar a cada venda do mês |
+| Cancelado fora da RBT12 | Venda desfeita não é receita bruta |
+| Rateio de frete soma o total da nota | Nenhum centavo de frete pode sumir ou ser criado no rateio |
 
 ### Tratamento numérico
 
@@ -177,6 +216,8 @@ editar usuário e lançar custo de mídia (documentado, mas sem endpoint). Hoje 
 | Produto | ✅ | ✅ | ✅ | Com venda registrada é **desativado**, não apagado — o histórico de margem continua consultável |
 | De-para de SKU | ✅ | — | ✅ | Desfazer devolve o SKU às pendências; o custo já congelado nas vendas antigas não muda |
 | Custo em lote | — | ✅ | — | Afeta só vendas futuras |
+| Frete de compra | — | ✅ | — | Rateio por quantidade ou valor, com simulação |
+| Faixas do Simples | ✅ | ✅ | ✅ | Substituídas por inteiro, nunca mescladas |
 | Regra tributária | ✅ | ✅ | ✅ | Reapuração recalcula os pedidos do período |
 | Despesa operacional | ✅ | ✅ | ✅ | Recorrentes replicáveis para o mês seguinte |
 | Usuário | ✅ | ✅ | Desativa | **Nunca apagado**: o `user_id` é referenciado na trilha de auditoria, e apagá-lo deixaria registros órfãos justamente na tabela usada para investigar incidentes |
@@ -239,7 +280,8 @@ Nenhuma delas é contornável por código — todas dependem de terceiros:
 cd backend && .venv/bin/python -m pytest tests/ -v
 
 # Só a cadeia financeira de ponta a ponta
-.venv/bin/python -m pytest tests/test_auditoria_ponta_a_ponta.py tests/test_impostos_e_dre.py -v
+.venv/bin/python -m pytest tests/test_auditoria_ponta_a_ponta.py tests/test_impostos_e_dre.py \
+                          tests/test_simples_e_custo_aquisicao.py -v
 
 # Divergência entre modelos e migrations (deve gerar um upgrade vazio)
 .venv/bin/alembic revision --autogenerate -m "verificacao"

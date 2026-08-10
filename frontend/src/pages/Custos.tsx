@@ -9,6 +9,7 @@
 import { useState } from 'react'
 
 import {
+  useContasAReceber,
   useDRE,
   useDREMensal,
   useDespesas,
@@ -17,6 +18,7 @@ import {
   useRemoverDespesa,
   useRemoverRegra,
   useReplicarDespesas,
+  useResumoTributario,
   useSalvarDespesa,
   useSalvarRegra,
 } from '@/api/queries'
@@ -34,7 +36,7 @@ import {
   Vazio,
 } from '@/components/ui'
 import { brl, data, pct } from '@/lib/format'
-import type { Despesa, LinhaDRE, RegraImposto } from '@/types/api'
+import type { Despesa, Faixa, LinhaDRE, RegraImposto } from '@/types/api'
 
 const BASES: Record<string, string> = {
   gross_revenue: 'Receita bruta',
@@ -158,6 +160,8 @@ export function Custos() {
         </Secao>
       </div>
 
+      <ApuracaoDoSimples />
+      <ContasAReceberPainel />
       <RegrasTributarias />
       <DespesasOperacionais />
     </div>
@@ -220,17 +224,169 @@ function QuadroDRE({ linhas }: { linhas: LinhaDRE[] }) {
   )
 }
 
+// --- Apuração do Simples -----------------------------------------------------
+
+function ApuracaoDoSimples() {
+  const [filtros] = useFiltros()
+  const resumo = useResumoTributario(filtros)
+
+  if (resumo.isLoading) return <Carregando altura="h-40" />
+  if (!resumo.data) return null
+
+  const { rbt12, regras_vigentes: regras, alerta } = resumo.data
+
+  return (
+    <Secao
+      titulo="Apuração do Simples Nacional"
+      descricao="A alíquota do Simples não é fixa: sai da receita bruta acumulada dos 12 meses anteriores (RBT12), pela fórmula (RBT12 × nominal − parcela a deduzir) ÷ RBT12."
+    >
+      {alerta && (
+        <div className="mb-3">
+          <AvisoQualidade texto={alerta} />
+        </div>
+      )}
+      {rbt12.observacao && (
+        <div className="mb-3">
+          <AvisoQualidade texto={rbt12.observacao} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          rotulo="RBT12 acumulada"
+          valor={rbt12.acumulado}
+          formato="moeda"
+          dica="Receita bruta dos 12 meses anteriores ao mês de apuração. O mês corrente fica de fora."
+        />
+        <KpiCard
+          rotulo="RBT12 para a faixa"
+          valor={rbt12.proporcionalizada}
+          formato="moeda"
+          dica="Com menos de 12 meses de operação, a lei manda proporcionalizar: média dos meses × 12."
+        />
+        <KpiCard
+          rotulo="Meses de histórico"
+          valor={rbt12.meses_de_historico}
+          formato="numero"
+        />
+        <KpiCard
+          rotulo="Alíquota efetiva"
+          valor={resumo.data.aliquota_efetiva_pct}
+          formato="percentual"
+          dica="Imposto apurado dividido pela receita bruta do período."
+        />
+      </div>
+
+      {regras.length > 0 && (
+        <div className="mt-3">
+          <Tabela colunas={['Regra', 'Regime', 'Base', 'RBT12 usada', 'Alíquota aplicada']}>
+            {regras.map((r) => (
+              <tr key={r.id} className="hover:bg-surface-raised">
+                <td className="td">
+                  {r.name}
+                  {r.annex && <span className="ml-1 text-xs text-ink-muted">({r.annex})</span>}
+                </td>
+                <td className="td text-xs">
+                  {r.regime === 'simples_progressive' ? 'Progressivo' : 'Fixo'}
+                </td>
+                <td className="td text-xs">{BASES[r.base] ?? r.base}</td>
+                <td className="td num text-xs">{r.rbt12 ? brl(r.rbt12) : '—'}</td>
+                <td
+                  className={`td num font-medium ${
+                    r.excedeu_teto_do_simples ? 'text-bad' : ''
+                  }`}
+                >
+                  {pct(r.aliquota_aplicada_pct, 2)}
+                </td>
+              </tr>
+            ))}
+          </Tabela>
+        </div>
+      )}
+    </Secao>
+  )
+}
+
+// --- Contas a receber --------------------------------------------------------
+
+const ROTULO_FAIXA: Record<string, string> = {
+  vencido: 'Vencido',
+  ate_7_dias: 'Até 7 dias',
+  ate_30_dias: 'Até 30 dias',
+  acima_de_30: 'Acima de 30 dias',
+  sem_previsao: 'Sem previsão',
+}
+
+function ContasAReceberPainel() {
+  const receber = useContasAReceber()
+
+  if (receber.isLoading) return <Carregando altura="h-40" />
+  if (!receber.data) return null
+
+  const { resumo, por_faixa: faixas, por_provedor: provedores } = receber.data
+
+  return (
+    <Secao
+      titulo="Saldo a receber"
+      descricao="Quanto ainda vai cair na conta, somando Mercado Pago e Shopee. Já é líquido das taxas do canal — o imposto do seu regime ainda sai daqui."
+    >
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <KpiCard rotulo="Total a receber" valor={resumo.total_a_receber} formato="moeda" />
+        <KpiCard
+          rotulo="Já liberado"
+          valor={resumo.total_ja_liberado}
+          formato="moeda"
+          dica="Valores cuja liberação o canal já confirmou."
+        />
+        <KpiCard
+          rotulo="Vencido"
+          valor={faixas.vencido}
+          formato="moeda"
+          dica="Data de liberação já passou e o canal ainda não confirmou. É o primeiro valor a investigar."
+        />
+      </div>
+
+      <div className="mt-3 grid gap-4 lg:grid-cols-2">
+        <Tabela colunas={['Prazo', 'Valor']}>
+          {Object.entries(faixas).map(([chave, valor]) => (
+            <tr key={chave} className="hover:bg-surface-raised">
+              <td className={`td ${chave === 'vencido' ? 'text-bad' : ''}`}>
+                {ROTULO_FAIXA[chave] ?? chave}
+              </td>
+              <td className="td num">{brl(valor)}</td>
+            </tr>
+          ))}
+        </Tabela>
+
+        <Tabela colunas={['Provedor', 'Pendente', 'Liberado', 'Pagamentos']}>
+          {provedores.map((p) => (
+            <tr key={p.provedor} className="hover:bg-surface-raised">
+              <td className="td">{p.provedor}</td>
+              <td className="td num font-medium">{brl(p.pendente)}</td>
+              <td className="td num text-ink-muted">{brl(p.liberado)}</td>
+              <td className="td num">{p.pagamentos}</td>
+            </tr>
+          ))}
+        </Tabela>
+      </div>
+    </Secao>
+  )
+}
+
 // --- Regras tributárias ------------------------------------------------------
 
 const REGRA_VAZIA = {
   name: '',
   kind: 'simples_nacional',
   rate_pct: '',
+  regime: 'fixed' as 'fixed' | 'simples_progressive',
+  annex: '',
   base: 'gross_revenue',
   channel: '',
   valid_from: new Date().toISOString().slice(0, 10),
   valid_to: '',
   notes: '',
+  faixas: [] as Faixa[],
 }
 
 function RegrasTributarias() {
@@ -249,11 +405,14 @@ function RegrasTributarias() {
             name: r.name,
             kind: r.kind,
             rate_pct: r.rate_pct,
+            regime: r.regime,
+            annex: r.annex,
             base: r.base,
             channel: r.channel,
             valid_from: r.valid_from,
             valid_to: r.valid_to ?? '',
             notes: r.notes,
+            faixas: r.brackets ?? [],
           }
         : { ...REGRA_VAZIA },
     )
@@ -291,7 +450,15 @@ function RegrasTributarias() {
           {(regras.data ?? []).map((r) => (
             <tr key={r.id} className="hover:bg-surface-raised">
               <td className="td">{r.name}</td>
-              <td className="td num">{pct(r.rate_pct, 2)}</td>
+              <td className="td num">
+                {r.regime === 'simples_progressive' ? (
+                  <span className="text-xs text-ink-soft" title={`${r.brackets?.length ?? 0} faixas`}>
+                    Progressiva
+                  </span>
+                ) : (
+                  pct(r.rate_pct, 2)
+                )}
+              </td>
               <td className="td text-xs">{BASES[r.base] ?? r.base}</td>
               <td className="td text-xs">{r.channel || 'Todos'}</td>
               <td className="td text-xs">
@@ -346,19 +513,52 @@ function RegrasTributarias() {
                 onChange={(e) => setEdicao({ ...edicao, name: e.target.value })}
               />
             </Campo>
+            <Campo
+              rotulo="Regime"
+              dica={
+                edicao.regime === 'simples_progressive'
+                  ? 'A alíquota sai das faixas de RBT12, recalculada a cada mês.'
+                  : 'Alíquota única, informada abaixo. Use para Lucro Presumido, ICMS-ST ou ISS fixo.'
+              }
+            >
+              <select
+                className="input"
+                value={edicao.regime}
+                onChange={(e) =>
+                  setEdicao({
+                    ...edicao,
+                    regime: e.target.value as 'fixed' | 'simples_progressive',
+                  })
+                }
+              >
+                <option value="fixed">Alíquota fixa</option>
+                <option value="simples_progressive">Simples Nacional (progressivo)</option>
+              </select>
+            </Campo>
             <div className="grid grid-cols-2 gap-3">
-              <Campo rotulo="Alíquota (%)">
-                <input
-                  required
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  className="input"
-                  value={edicao.rate_pct}
-                  onChange={(e) => setEdicao({ ...edicao, rate_pct: e.target.value })}
-                />
-              </Campo>
+              {edicao.regime === 'fixed' ? (
+                <Campo rotulo="Alíquota (%)">
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    className="input"
+                    value={edicao.rate_pct}
+                    onChange={(e) => setEdicao({ ...edicao, rate_pct: e.target.value })}
+                  />
+                </Campo>
+              ) : (
+                <Campo rotulo="Anexo" dica="Só para leitura humana.">
+                  <input
+                    className="input"
+                    placeholder="Anexo I — Comércio"
+                    value={edicao.annex}
+                    onChange={(e) => setEdicao({ ...edicao, annex: e.target.value })}
+                  />
+                </Campo>
+              )}
               <Campo rotulo="Base de cálculo">
                 <select
                   className="input"
@@ -403,6 +603,12 @@ function RegrasTributarias() {
                 <option value="shopee">Shopee</option>
               </select>
             </Campo>
+            {edicao.regime === 'simples_progressive' && (
+              <EditorDeFaixas
+                faixas={edicao.faixas}
+                aoMudar={(faixas) => setEdicao({ ...edicao, faixas })}
+              />
+            )}
             {salvar.isError && <ErroBox erro={salvar.error} />}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" className="btn text-xs" onClick={() => setEdicao(null)}>
@@ -416,6 +622,103 @@ function RegrasTributarias() {
         )}
       </Modal>
     </Secao>
+  )
+}
+
+/**
+ * Tabela de faixas do Simples, editável.
+ *
+ * As faixas ficam como dado e não no código de propósito: a tabela muda por lei
+ * complementar, e quem confere é o contador do vendedor. Um valor compilado que
+ * ninguém revisa erraria toda a apuração em silêncio.
+ */
+function EditorDeFaixas({
+  faixas,
+  aoMudar,
+}: {
+  faixas: Faixa[]
+  aoMudar: (faixas: Faixa[]) => void
+}) {
+  const alterar = (indice: number, campo: keyof Faixa, valor: string) => {
+    const copia = [...faixas]
+    copia[indice] = { ...copia[indice], [campo]: valor }
+    aoMudar(copia)
+  }
+
+  return (
+    <div className="rounded-lg border border-line p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-ink-soft">Faixas da tabela</span>
+        <button
+          type="button"
+          className="btn px-2 py-0.5 text-xs"
+          onClick={() =>
+            aoMudar([
+              ...faixas,
+              { rbt12_ate: '', aliquota_nominal_pct: '', parcela_deduzir: '0' },
+            ])
+          }
+        >
+          Adicionar faixa
+        </button>
+      </div>
+
+      <div className="grid grid-cols-[1.4fr,1fr,1.2fr,auto] gap-1 text-[10px] uppercase tracking-wide text-ink-muted">
+        <span>RBT12 até</span>
+        <span>Nominal %</span>
+        <span>Deduzir R$</span>
+        <span />
+      </div>
+
+      <div className="mt-1 space-y-1">
+        {faixas.map((faixa, indice) => (
+          <div key={indice} className="grid grid-cols-[1.4fr,1fr,1.2fr,auto] gap-1">
+            <input
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              className="input py-1 text-xs"
+              value={String(faixa.rbt12_ate)}
+              onChange={(e) => alterar(indice, 'rbt12_ate', e.target.value)}
+            />
+            <input
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              className="input py-1 text-xs"
+              value={String(faixa.aliquota_nominal_pct)}
+              onChange={(e) => alterar(indice, 'aliquota_nominal_pct', e.target.value)}
+            />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className="input py-1 text-xs"
+              value={String(faixa.parcela_deduzir)}
+              onChange={(e) => alterar(indice, 'parcela_deduzir', e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn px-2 py-1 text-xs"
+              onClick={() => aoMudar(faixas.filter((_, i) => i !== indice))}
+              aria-label="Remover faixa"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {faixas.length === 0 && (
+        <p className="mt-2 text-[11px] text-ink-muted">
+          Sem faixas, a apuração não roda. Confira a tabela vigente do seu anexo com o
+          contador antes de lançar.
+        </p>
+      )}
+    </div>
   )
 }
 

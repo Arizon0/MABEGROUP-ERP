@@ -16,6 +16,7 @@ from app.models.enums import StatusPedido
 from app.models.order import Order, OrderItem
 from app.schemas.common import Base, RespostaOperacao
 from app.services import audit
+from app.services.finance import arredondar
 
 router = APIRouter(prefix="/catalog", tags=["Produtos e estoque"])
 
@@ -26,6 +27,8 @@ class ProdutoIn(BaseModel):
     brand: str = ""
     category: str = ""
     unit_cost: Decimal = Decimal("0")
+    freight_in_cost: Decimal = Decimal("0")
+    other_acquisition_cost: Decimal = Decimal("0")
     packaging_cost: Decimal = Decimal("0")
     ncm: str = ""
     ean: str = ""
@@ -38,7 +41,11 @@ class ProdutoOut(Base):
     name: str
     brand: str
     unit_cost: Decimal
+    freight_in_cost: Decimal
+    other_acquisition_cost: Decimal
     packaging_cost: Decimal
+    custo_aquisicao: Decimal
+    custo_total_unitario: Decimal
     is_active: bool
 
 
@@ -51,6 +58,7 @@ class MapeamentoIn(BaseModel):
 class CustoEmLoteIn(BaseModel):
     sku: str
     unit_cost: Decimal = Field(ge=0)
+    freight_in_cost: Decimal | None = Field(default=None, ge=0)
     packaging_cost: Decimal | None = Field(default=None, ge=0)
 
 
@@ -394,6 +402,8 @@ async def atualizar_custos_em_lote(
             nao_encontrados.append(linha.sku)
             continue
         produto.unit_cost = linha.unit_cost
+        if linha.freight_in_cost is not None:
+            produto.freight_in_cost = linha.freight_in_cost
         if linha.packaging_cost is not None:
             produto.packaging_cost = linha.packaging_cost
         atualizados += 1
@@ -500,8 +510,11 @@ async def mapear_sku(dados: MapeamentoIn, ctx: AnalistaDep, db: DbDep) -> Respos
     for item in itens:
         item.product_id = produto.id
         item.sku_base = produto.sku
-        item.unit_cost = produto.unit_cost
-        item.cogs = (produto.unit_cost * item.quantity).quantize(Decimal("0.0001"))
+        # Mesmo custo que a ingestão aplicaria: aquisição (fornecedor + frete de
+        # compra + outros) mais embalagem. Usar só ``unit_cost`` aqui faria o
+        # pedido remapeado ter CMV menor que o pedido idêntico já importado.
+        item.unit_cost = produto.custo_total_unitario
+        item.cogs = (item.unit_cost * item.quantity).quantize(Decimal("0.0001"))
 
     pedidos_afetados = {i.order_id for i in itens}
     for pedido_id in pedidos_afetados:
@@ -528,6 +541,128 @@ async def mapear_sku(dados: MapeamentoIn, ctx: AnalistaDep, db: DbDep) -> Respos
     return RespostaOperacao(
         mensagem=f"SKU {dados.sku_channel} vinculado a {produto.sku}.",
         dados={"itens_atualizados": len(itens), "pedidos_recalculados": len(pedidos_afetados)},
+    )
+
+
+class ItemDaCompraIn(BaseModel):
+    sku: str
+    quantidade: Decimal = Field(gt=0)
+    #: Valor pago ao fornecedor pela linha — usado no rateio por valor.
+    valor_total: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class RateioDeFreteIn(BaseModel):
+    """Nota de compra a ratear: um frete total e os itens que vieram nela."""
+
+    frete_total: Decimal = Field(ge=0)
+    outros_custos: Decimal = Field(default=Decimal("0"), ge=0)
+    criterio: str = Field(default="quantidade", pattern="^(quantidade|valor)$")
+    itens: list[ItemDaCompraIn] = Field(min_length=1)
+    aplicar: bool = True
+
+
+@router.post(
+    "/products/freight-in",
+    response_model=RespostaOperacao,
+    summary="Rateia o frete de compra entre os itens da nota",
+)
+async def ratear_frete_de_compra(
+    dados: RateioDeFreteIn, ctx: AnalistaDep, db: DbDep
+) -> RespostaOperacao:
+    """Distribui o frete do fornecedor até o galpão entre os itens recebidos.
+
+    O frete chega como um valor único na nota, mas o custo é por unidade — e é
+    assim que ele precisa entrar no CMV. Dois critérios, porque nenhum serve
+    para tudo:
+
+    * **quantidade** — divide igualmente por unidade. Correto quando os itens
+      têm porte parecido, que é o caso de retentores e anéis.
+    * **valor** — proporcional ao valor da linha. Melhor quando a nota mistura
+      itens de preços muito diferentes, porque evita que uma peça barata receba
+      a mesma parcela de frete de uma cara.
+
+    O rateio ideal seria por peso ou cubagem, que é o que a transportadora
+    cobra; nenhum dos dois costuma estar na nota por item, e inventar um
+    critério que o vendedor não consegue conferir seria pior que oferecer os
+    dois que ele consegue.
+
+    Com ``aplicar=false`` devolve a simulação sem gravar.
+    """
+    total_a_ratear = dados.frete_total + dados.outros_custos
+
+    if dados.criterio == "valor":
+        divisor = sum((i.valor_total for i in dados.itens), Decimal("0"))
+        if divisor <= 0:
+            raise Conflito(
+                "Rateio por valor exige o valor de cada linha. Informe os valores "
+                "ou use o critério por quantidade."
+            )
+        pesos = {i.sku: i.valor_total for i in dados.itens}
+    else:
+        divisor = sum((i.quantidade for i in dados.itens), Decimal("0"))
+        pesos = {i.sku: i.quantidade for i in dados.itens}
+
+    quantidades = {i.sku: i.quantidade for i in dados.itens}
+    linhas: list[dict[str, Any]] = []
+    nao_encontrados: list[str] = []
+    aplicados = 0
+
+    for item in dados.itens:
+        parcela = (total_a_ratear * pesos[item.sku] / divisor) if divisor else Decimal("0")
+        por_unidade = (parcela / quantidades[item.sku]).quantize(Decimal("0.0001"))
+
+        produto = await db.scalar(
+            select(Product).where(
+                Product.tenant_id == ctx.tenant_id, Product.sku == item.sku
+            )
+        )
+        if produto is None:
+            nao_encontrados.append(item.sku)
+            continue
+
+        if dados.aplicar:
+            produto.freight_in_cost = por_unidade
+            aplicados += 1
+
+        linhas.append(
+            {
+                "sku": item.sku,
+                "quantidade": str(item.quantidade),
+                "frete_rateado": str(arredondar(parcela)),
+                "frete_por_unidade": str(por_unidade),
+                "custo_aquisicao": str(
+                    Decimal(str(produto.unit_cost)) + por_unidade
+                    + Decimal(str(produto.other_acquisition_cost or 0))
+                ),
+            }
+        )
+
+    if dados.aplicar:
+        await audit.registrar(
+            db,
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            action="product.freight_in",
+            after={
+                "frete_total": str(total_a_ratear),
+                "criterio": dados.criterio,
+                "aplicados": aplicados,
+            },
+        )
+        await db.commit()
+
+    return RespostaOperacao(
+        mensagem=(
+            f"{aplicados} produtos atualizados com o frete de compra."
+            if dados.aplicar
+            else "Simulação — nada foi gravado."
+        ),
+        dados={
+            "criterio": dados.criterio,
+            "total_rateado": str(arredondar(total_a_ratear)),
+            "itens": linhas,
+            "nao_encontrados": nao_encontrados,
+        },
     )
 
 

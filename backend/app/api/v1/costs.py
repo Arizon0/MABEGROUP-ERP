@@ -7,23 +7,50 @@ from typing import Any
 
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import selectinload
 
 from app.core.deps import AdminDep, AnalistaDep, CtxDep, DbDep
 from app.core.errors import Conflito, NaoEncontrado
-from app.models.costs import BaseImposto, MonthlyClose, OperatingExpense, TaxRule
+from app.models.costs import (
+    BaseImposto,
+    MonthlyClose,
+    OperatingExpense,
+    RegimeTributario,
+    TaxBracket,
+    TaxRule,
+)
 from app.schemas.common import Base, RespostaOperacao
-from app.services import analytics, audit, dre as servico_dre, taxes
+from app.services import analytics, audit, dre as servico_dre, finance, taxes
 
 router = APIRouter(prefix="/costs", tags=["Custos, impostos e DRE"])
 
 
 # --- Schemas ----------------------------------------------------------------
 
+class FaixaIn(BaseModel):
+    rbt12_ate: Decimal = Field(gt=0)
+    aliquota_nominal_pct: Decimal = Field(ge=0, le=100)
+    parcela_deduzir: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class FaixaOut(Base):
+    id: int
+    rbt12_ate: Decimal
+    aliquota_nominal_pct: Decimal
+    parcela_deduzir: Decimal
+
+
 class RegraImpostoIn(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     kind: str = "simples_nacional"
-    rate_pct: Decimal = Field(ge=0, le=100)
+    #: Ignorado quando ``regime="simples_progressive"``: ali a alíquota sai das
+    #: faixas, e aceitar um valor fixo junto criaria dois números concorrentes
+    #: para a mesma coisa.
+    rate_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    regime: str = Field(default=RegimeTributario.FIXA, pattern="^(fixed|simples_progressive)$")
+    annex: str = ""
+    faixas: list[FaixaIn] = Field(default_factory=list)
     base: str = BaseImposto.RECEITA_BRUTA
     channel: str = ""
     valid_from: date
@@ -37,6 +64,9 @@ class RegraImpostoOut(Base):
     name: str
     kind: str
     rate_pct: Decimal
+    regime: str
+    annex: str
+    brackets: list[FaixaOut] = []
     base: str
     channel: str
     valid_from: date
@@ -72,6 +102,7 @@ class DespesaOut(Base):
 async def listar_regras(ctx: CtxDep, db: DbDep) -> list[RegraImpostoOut]:
     resultado = await db.execute(
         select(TaxRule)
+        .options(selectinload(TaxRule.brackets))
         .where(TaxRule.tenant_id == ctx.tenant_id)
         .order_by(TaxRule.valid_from.desc())
     )
@@ -93,9 +124,27 @@ async def criar_regra(dados: RegraImpostoIn, ctx: AnalistaDep, db: DbDep) -> Reg
     if dados.valid_to and dados.valid_to < dados.valid_from:
         raise Conflito("A data final da vigência não pode ser anterior à inicial.")
 
-    regra = TaxRule(tenant_id=ctx.tenant_id, **dados.model_dump())
+    faixas = dados.faixas
+    if dados.regime == RegimeTributario.SIMPLES_PROGRESSIVO and not faixas:
+        raise Conflito(
+            "Regime progressivo exige as faixas da tabela. Informe as faixas ou "
+            "use o regime de alíquota fixa."
+        )
+
+    regra = TaxRule(
+        tenant_id=ctx.tenant_id,
+        **dados.model_dump(exclude={"faixas"}),
+    )
     db.add(regra)
     await db.flush()
+    for faixa in faixas:
+        db.add(
+            TaxBracket(
+                tenant_id=ctx.tenant_id, tax_rule_id=regra.id, **faixa.model_dump()
+            )
+        )
+    await db.flush()
+    await db.refresh(regra, ["brackets"])
     await audit.registrar(
         db,
         tenant_id=ctx.tenant_id,
@@ -106,6 +155,7 @@ async def criar_regra(dados: RegraImpostoIn, ctx: AnalistaDep, db: DbDep) -> Reg
         after=dados.model_dump(mode="json"),
     )
     await db.commit()
+    await db.refresh(regra, ["brackets"])
     return RegraImpostoOut.model_validate(regra)
 
 
@@ -115,8 +165,21 @@ async def editar_regra(
 ) -> RegraImpostoOut:
     regra = await _obter_regra(db, ctx.tenant_id, regra_id)
     antes = {"rate_pct": str(regra.rate_pct), "valid_from": regra.valid_from.isoformat()}
-    for campo, valor in dados.model_dump().items():
+    for campo, valor in dados.model_dump(exclude={"faixas"}).items():
         setattr(regra, campo, valor)
+
+    # As faixas são substituídas por inteiro, não mescladas: a tabela do Simples
+    # muda faixa a faixa por lei, e um merge parcial deixaria conviverem
+    # números de tabelas diferentes na mesma regra.
+    if dados.faixas:
+        await db.execute(delete(TaxBracket).where(TaxBracket.tax_rule_id == regra_id))
+        for faixa in dados.faixas:
+            db.add(
+                TaxBracket(
+                    tenant_id=ctx.tenant_id, tax_rule_id=regra_id, **faixa.model_dump()
+                )
+            )
+        await db.flush()
     await audit.registrar(
         db,
         tenant_id=ctx.tenant_id,
@@ -384,14 +447,58 @@ async def resumo_tributario(
     ini, f = analytics.normalizar_periodo(inicio, fim)
     efetiva = await taxes.aliquota_efetiva(db, ctx.tenant_id, inicio=ini, fim=f)
     regras = await taxes.regras_vigentes(db, ctx.tenant_id, f.date())
+    mes = f.date().replace(day=1)
+
+    detalhadas: list[dict[str, Any]] = []
+    soma = Decimal("0")
+    for r in regras:
+        taxa, rbt12 = await taxes.aliquota_do_periodo(db, ctx.tenant_id, r, referencia=mes)
+        soma += taxa
+        detalhadas.append(
+            {
+                "id": r.id,
+                "name": r.name,
+                "regime": r.regime,
+                "annex": r.annex,
+                "base": r.base,
+                "aliquota_aplicada_pct": str(taxa),
+                # A RBT12 acompanha a alíquota de propósito: sem ela ninguém
+                # confere de onde saiu o número, e a apuração vira um valor que
+                # o contador teria de aceitar por fé.
+                "rbt12": str(finance.arredondar(rbt12)) if rbt12 else None,
+                "excedeu_teto_do_simples": taxes.excedeu_o_teto(r, rbt12),
+            }
+        )
+
+    bruto_12m, meses = await taxes.calcular_rbt12(db, ctx.tenant_id, referencia=mes)
     return {
         "periodo": {"inicio": ini, "fim": f},
         "aliquota_efetiva_pct": str(efetiva),
-        "regras_vigentes": [
-            {"id": r.id, "name": r.name, "rate_pct": str(r.rate_pct), "base": r.base}
-            for r in regras
-        ],
-        "soma_aliquotas_pct": str(sum((Decimal(str(r.rate_pct)) for r in regras), Decimal("0"))),
+        "rbt12": {
+            "acumulado": str(finance.arredondar(bruto_12m)),
+            "meses_de_historico": meses,
+            "proporcionalizada": str(
+                finance.arredondar(taxes.rbt12_proporcionalizada(bruto_12m, meses))
+            ),
+            "observacao": (
+                "Menos de 12 meses de operação: a receita é proporcionalizada "
+                "conforme a regra de início de atividade."
+                if 0 < meses < 12
+                else ""
+            ),
+        },
+        "regras_vigentes": detalhadas,
+        "soma_aliquotas_pct": str(soma),
+        "alerta": next(
+            (
+                f"O faturamento acumulado ultrapassou o teto da tabela de "
+                f"{r['name']}. No Simples isso desenquadra a empresa — procure "
+                f"o contador antes de usar esta apuração."
+                for r in detalhadas
+                if r["excedeu_teto_do_simples"]
+            ),
+            "",
+        ),
     }
 
 
@@ -482,7 +589,9 @@ async def listar_fechamentos(ctx: CtxDep, db: DbDep) -> list[dict[str, Any]]:
 
 async def _obter_regra(db, tenant_id: int, regra_id: int) -> TaxRule:
     regra = await db.scalar(
-        select(TaxRule).where(TaxRule.id == regra_id, TaxRule.tenant_id == tenant_id)
+        select(TaxRule)
+        .options(selectinload(TaxRule.brackets))
+        .where(TaxRule.id == regra_id, TaxRule.tenant_id == tenant_id)
     )
     if regra is None:
         raise NaoEncontrado("Regra tributária não encontrada.")

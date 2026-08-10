@@ -20,10 +20,11 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models.costs import BaseImposto, TaxRule
+from app.models.costs import BaseImposto, RegimeTributario, TaxRule
 from app.models.enums import StatusPedido
 from app.models.order import Order
 from app.services.finance import arredondar
@@ -60,9 +61,12 @@ async def regras_vigentes(
     todas = list(
         (
             await db.execute(
-                select(TaxRule).where(
-                    TaxRule.tenant_id == tenant_id, TaxRule.is_active.is_(True)
-                )
+                # ``selectinload`` obrigatório: as faixas são lidas fora do
+                # contexto da consulta, e lazy loading em sessão async levanta
+                # MissingGreenlet em vez de simplesmente buscar.
+                select(TaxRule)
+                .options(selectinload(TaxRule.brackets))
+                .where(TaxRule.tenant_id == tenant_id, TaxRule.is_active.is_(True))
             )
         ).scalars()
     )
@@ -73,8 +77,144 @@ async def regras_vigentes(
     ]
 
 
-def calcular_imposto(pedido: Order, regras: list[TaxRule]) -> tuple[Decimal, int | None]:
+# --- Simples Nacional: alíquota efetiva por faixa ----------------------------
+
+def _primeiro_dia(quando: date) -> date:
+    return quando.replace(day=1)
+
+
+def _somar_meses(quando: date, delta: int) -> date:
+    total = (quando.year * 12 + quando.month - 1) + delta
+    return date(total // 12, total % 12 + 1, 1)
+
+
+async def calcular_rbt12(
+    db: AsyncSession, tenant_id: int, *, referencia: date
+) -> tuple[Decimal, int]:
+    """Receita bruta acumulada nos 12 meses **anteriores** ao mês de apuração.
+
+    A janela exclui o mês corrente de propósito: é assim que a LC 123/2006
+    define a RBT12, e incluir o mês em curso faria a alíquota mudar a cada venda
+    do mês, tornando impossível conferir a apuração.
+
+    Devolve também **quantos meses de histórico existem**. Empresa com menos de
+    13 meses de operação não tem RBT12 completa, e a lei manda proporcionalizar
+    — sem isso, um negócio novo cairia sempre na primeira faixa e recolheria a
+    menos.
+    """
+    fim = _primeiro_dia(referencia)
+    inicio = _somar_meses(fim, -12)
+
+    total = await db.scalar(
+        select(func.coalesce(func.sum(Order.gross_amount), 0)).where(
+            Order.tenant_id == tenant_id,
+            Order.status != StatusPedido.CANCELADO,
+            Order.date_created >= datetime(inicio.year, inicio.month, 1),
+            Order.date_created < datetime(fim.year, fim.month, 1),
+        )
+    )
+
+    primeiro_pedido = await db.scalar(
+        select(func.min(Order.date_created)).where(Order.tenant_id == tenant_id)
+    )
+    if primeiro_pedido is None:
+        return ZERO, 0
+
+    inicio_operacao = max(_primeiro_dia(primeiro_pedido.date()), inicio)
+    meses = max(
+        0, (fim.year * 12 + fim.month) - (inicio_operacao.year * 12 + inicio_operacao.month)
+    )
+    return Decimal(str(total or 0)), meses
+
+
+def rbt12_proporcionalizada(bruto: Decimal, meses: int) -> Decimal:
+    """Projeta a receita de quem ainda não completou 12 meses.
+
+    Regra da LC 123/2006 para início de atividade: usa-se a média dos meses em
+    operação multiplicada por 12. Sem isso, uma empresa nova ficaria presa na
+    faixa mais baixa até completar um ano e recolheria abaixo do devido.
+    """
+    if meses <= 0:
+        return ZERO
+    if meses >= 12:
+        return bruto
+    return (bruto / Decimal(meses) * Decimal("12")).quantize(Decimal("0.01"))
+
+
+def aliquota_efetiva_simples(regra: TaxRule, rbt12: Decimal) -> Decimal:
+    """Alíquota efetiva do Simples Nacional, em pontos percentuais.
+
+        efetiva = (RBT12 × alíquota nominal − parcela a deduzir) ÷ RBT12
+
+    É a fórmula do art. 18 da LC 123/2006, e é o que torna a tabela
+    progressiva: sem a parcela a deduzir, cruzar o teto de uma faixa faria o
+    imposto saltar de degrau, e faturar R$ 1 a mais poderia custar milhares em
+    tributo.
+
+    Empresa sem histórico (RBT12 zero) fica na primeira faixa — é o tratamento
+    de início de atividade, não uma isenção.
+    """
+    faixas = sorted(regra.brackets, key=lambda f: Decimal(str(f.rbt12_ate)))
+    if not faixas:
+        return Decimal(str(regra.rate_pct or 0))
+
+    escolhida = next(
+        (f for f in faixas if rbt12 <= Decimal(str(f.rbt12_ate))),
+        faixas[-1],
+    )
+    nominal = Decimal(str(escolhida.aliquota_nominal_pct or 0))
+    deduzir = Decimal(str(escolhida.parcela_deduzir or 0))
+
+    if rbt12 <= ZERO:
+        return nominal
+
+    efetiva = (rbt12 * nominal / CEM - deduzir) / rbt12 * CEM
+    return max(ZERO, efetiva.quantize(Decimal("0.0001")))
+
+
+def excedeu_o_teto(regra: TaxRule, rbt12: Decimal) -> bool:
+    """Faturamento acima da última faixa da tabela.
+
+    No Simples isso não é "mais uma faixa": passar do teto **desenquadra** a
+    empresa, que precisa migrar de regime. O sistema continua calculando pela
+    última faixa, porque zerar o imposto seria pior, mas quem olha o painel
+    tem de saber que o número deixou de valer — um desenquadramento que passa
+    despercebido vira autuação.
+    """
+    if not regra.brackets:
+        return False
+    teto = max(Decimal(str(f.rbt12_ate)) for f in regra.brackets)
+    return rbt12 > teto
+
+
+async def aliquota_do_periodo(
+    db: AsyncSession, tenant_id: int, regra: TaxRule, *, referencia: date
+) -> tuple[Decimal, Decimal]:
+    """Alíquota a aplicar no mês e a RBT12 que a determinou.
+
+    Devolver as duas coisas juntas é intencional: sem a RBT12 ao lado, ninguém
+    consegue conferir de onde saiu a alíquota, e a apuração vira um número que
+    o contador tem de aceitar por fé.
+    """
+    if regra.regime != RegimeTributario.SIMPLES_PROGRESSIVO:
+        return Decimal(str(regra.rate_pct or 0)), ZERO
+
+    bruto, meses = await calcular_rbt12(db, tenant_id, referencia=referencia)
+    rbt12 = rbt12_proporcionalizada(bruto, meses)
+    return aliquota_efetiva_simples(regra, rbt12), rbt12
+
+
+def calcular_imposto(
+    pedido: Order,
+    regras: list[TaxRule],
+    aliquotas: dict[int, Decimal] | None = None,
+) -> tuple[Decimal, int | None]:
     """Aplica as regras vigentes e devolve ``(imposto, id_da_regra_principal)``.
+
+    ``aliquotas`` traz a alíquota já resolvida por regra — no Simples ela
+    depende da RBT12 do **mês**, não do pedido, e recalculá-la a cada linha
+    além de custar uma consulta por pedido permitiria que dois pedidos do mesmo
+    mês saíssem com alíquotas diferentes. Quando omitido, usa ``rate_pct``.
 
     Pedido cancelado não gera tributo — não houve receita.
     """
@@ -100,7 +240,8 @@ def calcular_imposto(pedido: Order, regras: list[TaxRule]) -> tuple[Decimal, int
             base = bruto
         base = max(ZERO, base - devolucao)
 
-        valor = (base * Decimal(str(regra.rate_pct or 0)) / CEM).quantize(Decimal("0.0001"))
+        taxa = (aliquotas or {}).get(regra.id, Decimal(str(regra.rate_pct or 0)))
+        valor = (base * taxa / CEM).quantize(Decimal("0.0001"))
         total += valor
         if valor > maior:
             maior, principal = valor, regra.id
@@ -132,6 +273,10 @@ async def apurar_periodo(
 
     resultado = ResultadoApuracao()
     cache: dict[tuple[date, str], list[TaxRule]] = {}
+    # A alíquota do Simples é do mês, não do pedido: resolver por (mês, regra)
+    # garante que todo pedido de agosto seja tributado igual e evita uma
+    # consulta de RBT12 por linha.
+    taxas: dict[tuple[date, int], Decimal] = {}
 
     for pedido in (await db.execute(consulta)).scalars():
         dia = pedido.date_created.date()
@@ -143,7 +288,15 @@ async def apurar_periodo(
         if not regras:
             resultado.sem_regra += 1
 
-        imposto, regra_id = calcular_imposto(pedido, regras)
+        mes = _primeiro_dia(dia)
+        aliquotas: dict[int, Decimal] = {}
+        for regra in regras:
+            if (mes, regra.id) not in taxas:
+                taxa, _ = await aliquota_do_periodo(db, tenant_id, regra, referencia=mes)
+                taxas[(mes, regra.id)] = taxa
+            aliquotas[regra.id] = taxas[(mes, regra.id)]
+
+        imposto, regra_id = calcular_imposto(pedido, regras, aliquotas)
         pedido.sales_tax_amount = imposto
         pedido.tax_rule_id = regra_id
 

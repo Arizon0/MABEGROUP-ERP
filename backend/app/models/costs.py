@@ -19,9 +19,18 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import BigPK, Base, TimestampMixin
+
+
+class RegimeTributario:
+    """Como a alíquota é determinada."""
+
+    #: Alíquota informada direto na regra (Lucro Presumido, ICMS-ST, ISS fixo).
+    FIXA = "fixed"
+    #: Alíquota **efetiva** calculada por faixa de RBT12 — o Simples de verdade.
+    SIMPLES_PROGRESSIVO = "simples_progressive"
 
 
 class BaseImposto:
@@ -68,10 +77,49 @@ class TaxRule(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str] = mapped_column(String(500), default="")
 
+    #: ``fixed`` usa ``rate_pct``; ``simples_progressive`` calcula a alíquota
+    #: efetiva a partir das faixas de RBT12 em ``tax_brackets``.
+    regime: Mapped[str] = mapped_column(String(30), default=RegimeTributario.FIXA)
+    #: Rótulo do anexo, só para leitura humana (ex.: "Anexo I — Comércio").
+    annex: Mapped[str] = mapped_column(String(60), default="")
+
+    brackets: Mapped[list[TaxBracket]] = relationship(
+        back_populates="rule", cascade="all, delete-orphan", order_by="TaxBracket.rbt12_ate"
+    )
+
     def vigente_em(self, quando: date) -> bool:
         if not self.is_active or quando < self.valid_from:
             return False
         return self.valid_to is None or quando <= self.valid_to
+
+
+class TaxBracket(Base):
+    """Faixa da tabela do Simples Nacional.
+
+    As faixas ficam **no banco, editáveis**, e não no código. A tabela do
+    Simples muda por lei complementar, e o responsável por conferi-la é o
+    contador do vendedor — não um valor compilado que ninguém revisa. O sistema
+    conhece a *fórmula*; os números são dado.
+    """
+
+    __tablename__ = "tax_brackets"
+    __table_args__ = (
+        UniqueConstraint("tax_rule_id", "rbt12_ate", name="uq_faixa_regra_teto"),
+    )
+
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigPK, nullable=False, index=True)
+    tax_rule_id: Mapped[int] = mapped_column(
+        BigPK, ForeignKey("tax_rules.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    #: Teto da faixa em receita bruta acumulada de 12 meses.
+    rbt12_ate: Mapped[Decimal] = mapped_column(nullable=False)
+    #: Alíquota nominal da faixa, em pontos percentuais.
+    aliquota_nominal_pct: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    #: Parcela a deduzir, em reais — o que torna a tabela progressiva de fato.
+    parcela_deduzir: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+
+    rule: Mapped[TaxRule] = relationship(back_populates="brackets")
 
 
 class CategoriaDespesa:

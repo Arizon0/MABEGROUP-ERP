@@ -16,7 +16,14 @@ from app.core.config import settings
 from app.core.security import hash_senha
 from app.models.catalog import Product
 from app.models.channel import ChannelAccount
-from app.models.costs import BaseImposto, CategoriaDespesa, OperatingExpense, TaxRule
+from app.models.costs import (
+    BaseImposto,
+    CategoriaDespesa,
+    OperatingExpense,
+    RegimeTributario,
+    TaxBracket,
+    TaxRule,
+)
 from app.models.enums import Canal, PapelUsuario, StatusConta
 from app.models.metrics import AlertRule
 from app.models.tenant import Tenant, User
@@ -34,6 +41,21 @@ CATALOGO = [
     ("9104", "Kit Junta Motor Completo Palio Fire", "Taranto", Decimal("104.60")),
     ("6621", "Bronzina de Mancal 0.25mm Gol 1.0 8V", "Metal Leve", Decimal("38.20")),
     ("4457", "Retentor Traseiro Câmbio HB20 1.0", "Corteco", Decimal("22.15")),
+]
+
+
+#: Faixas do Anexo I (comércio) do Simples Nacional: (teto da RBT12,
+#: alíquota nominal, parcela a deduzir). Ficam aqui apenas como ponto de
+#: partida da demonstração — em uso real são dado editável no banco, conferido
+#: pelo contador, porque a tabela muda por lei complementar e uma tabela
+#: desatualizada compilada no código erraria toda apuração em silêncio.
+ANEXO_I_COMERCIO = [
+    (Decimal("180000.00"), Decimal("4.00"), Decimal("0.00")),
+    (Decimal("360000.00"), Decimal("7.30"), Decimal("5940.00")),
+    (Decimal("720000.00"), Decimal("9.50"), Decimal("13860.00")),
+    (Decimal("1800000.00"), Decimal("10.70"), Decimal("22500.00")),
+    (Decimal("3600000.00"), Decimal("14.30"), Decimal("87300.00")),
+    (Decimal("4800000.00"), Decimal("19.00"), Decimal("378000.00")),
 ]
 
 
@@ -178,17 +200,32 @@ async def _custos_de_exemplo(db: AsyncSession, tenant_id: int) -> int:
     criados = 0
 
     if not await db.scalar(select(TaxRule).where(TaxRule.tenant_id == tenant_id)):
-        db.add(
-            TaxRule(
-                tenant_id=tenant_id,
-                name="Simples Nacional — Anexo I (exemplo)",
-                kind="simples_nacional",
-                rate_pct=Decimal("8.00"),
-                base=BaseImposto.RECEITA_BRUTA,
-                valid_from=datetime.now(UTC).date().replace(month=1, day=1),
-                notes="Valor de demonstração. Substitua pela alíquota do seu regime.",
-            )
+        regra = TaxRule(
+            tenant_id=tenant_id,
+            name="Simples Nacional — Anexo I",
+            kind="simples_nacional",
+            regime=RegimeTributario.SIMPLES_PROGRESSIVO,
+            annex="Anexo I — Comércio",
+            base=BaseImposto.RECEITA_BRUTA,
+            valid_from=datetime.now(UTC).date().replace(month=1, day=1),
+            notes=(
+                "Tabela de partida do Anexo I (comércio). CONFIRA COM SEU "
+                "CONTADOR antes de usar em apuração: a tabela muda por lei "
+                "complementar e as faixas são editáveis nesta tela."
+            ),
         )
+        db.add(regra)
+        await db.flush()
+        for teto, nominal, deduzir in ANEXO_I_COMERCIO:
+            db.add(
+                TaxBracket(
+                    tenant_id=tenant_id,
+                    tax_rule_id=regra.id,
+                    rbt12_ate=teto,
+                    aliquota_nominal_pct=nominal,
+                    parcela_deduzir=deduzir,
+                )
+            )
         criados += 1
 
     if not await db.scalar(
