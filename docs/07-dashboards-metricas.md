@@ -259,8 +259,9 @@ Série temporal com granularidade selecionável (hora/dia/semana/mês). Compara�
 períodos sobrepostos (mês atual × anterior × mesmo mês do ano passado). Curva de
 crescimento com média móvel de 7 dias. Rankings de produtos, SKUs, categorias,
 marketplaces e estados. Margem estimada por produto. Análise de coorte por mês de
-primeira venda. **Exportação em CSV, XLSX e PDF**, com jobs assíncronos para
-volumes grandes.
+primeira venda. **Exportação em CSV e XLSX**, em streaming — exportar centenas
+de milhares de linhas não estoura memória nem o tempo da requisição. PDF ainda
+não está implementado (ver docs/15 §15.6).
 
 ## Aba 11 — Configurações
 

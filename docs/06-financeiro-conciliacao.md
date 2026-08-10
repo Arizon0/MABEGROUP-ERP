@@ -179,6 +179,6 @@ consolidada entre canais.
 | Base para NF-e | Pedidos com valores e destinatário | Emissão fiscal |
 
 Exportação em **CSV** (streaming, sem limite de linhas), **XLSX** (com formatação e
-totalizadores) e **PDF** (relatório assinado com data de geração). Exportações
+totalizadores). O **PDF** ainda não está implementado. Exportações
 grandes rodam como job assíncrono, gravam no object storage e notificam por link
 temporário — em vez de travar a requisição HTTP e dar timeout.

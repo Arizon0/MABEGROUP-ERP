@@ -18,7 +18,10 @@ from app.services import analytics, audit, reconciliation
 
 router = APIRouter(prefix="/reports", tags=["Relatórios"])
 
-FORMATOS = {"csv", "xlsx", "pdf"}
+#: Formatos que os endpoints realmente aceitam. PDF está fora de propósito:
+#: anunciar um formato que a rota rejeita com 422 é pior do que não oferecê-lo,
+#: porque quem integra descobre a ausência só em produção.
+FORMATOS = {"csv", "xlsx"}
 
 
 @router.get(
@@ -220,7 +223,13 @@ async def formatos() -> dict[str, Any]:
     return {
         "formatos": sorted(FORMATOS),
         "observacao": (
-            "CSV e XLSX são gerados na hora. PDF e exportações muito grandes rodam "
-            "como job assíncrono e retornam link temporário — ver docs/06 §6.7."
+            "CSV e XLSX são gerados na hora, em streaming — exportar centenas de "
+            "milhares de linhas não estoura memória nem tempo de requisição."
         ),
+        "nao_disponiveis": {
+            "pdf": (
+                "Ainda não implementado. Para relatório assinado, exporte em XLSX "
+                "e gere o PDF na ferramenta de planilha."
+            )
+        },
     }

@@ -254,7 +254,61 @@ confirmado), **informado** (o canal declarou, ainda não liberou) ou **estimado*
 
 ---
 
-## 15.6 Limitações que permanecem
+## 15.6 O que ainda falta
+
+Levantamento de lacunas reais, feito comparando o que a documentação promete com
+o que o código faz. Separado por quem depende de quê — porque "falta" tem
+significados muito diferentes aqui.
+
+### Falta de código (dá para fazer a qualquer momento)
+
+| Item | Situação | Impacto |
+|---|---|---|
+| **Exportação em PDF** | Anunciada, não implementada. O endpoint `/reports/formats` chegava a listar `pdf` enquanto as rotas o rejeitavam com 422 — corrigido para não prometer o que não entrega | Baixo: XLSX cobre o uso, e o PDF sai da planilha |
+| **Alerta por e-mail e webhook** | As regras existem e disparam, mas o alerta só aparece no painel e no feed ao vivo | Médio: alerta que exige olhar a tela não avisa de madrugada |
+| **Mensagens pós-venda** | O modelo `messages` existe e a tabela é criada, mas nada popula: não há `fetch_messages` no conector nem recurso no sync | Médio: perguntas pré-venda são sincronizadas; a conversa pós-venda não |
+| **Curva ABC, coorte e média móvel** | Descritas na aba de Relatórios, sem implementação | Baixo: são análises derivadas do que já está no banco |
+| **Mapa do Brasil por estado** | A aba de Logística agrega por UF em tabela, não em mapa | Cosmético |
+| **Exportação assíncrona** | Tudo é síncrono em streaming. Aguenta centenas de milhares de linhas, mas não milhões | Baixo até o volume crescer muito |
+
+### Falta de credencial ou homologação (não depende de código)
+
+| Item | Bloqueio |
+|---|---|
+| Homologação do app Shopee | Submissão e aprovação para sair do ambiente `test-stable` |
+| Conexão real ML / Mercado Pago | Credenciais de produção do vendedor |
+| Ads API (custo de mídia) | Whitelist adicional da Shopee; o ML não expõe custo consolidado por campanha. Mitigado com lançamento manual |
+| Billing API do ML | Escopo adicional, para conciliar com o número oficial de cobrança |
+
+### Fora do escopo entregue (fases seguintes)
+
+Nada disto foi prometido como pronto — está no plano de evolução, e é trabalho
+substancial, não ajuste:
+
+- **Escrita de volta no marketplace**: alterar preço e estoque, responder
+  perguntas, despachar, gerar etiqueta. Exige escopo `write` nas APIs e uma fila
+  de aprovação, porque um erro em massa altera milhares de anúncios de uma vez.
+- **Estoque multi-local e pedidos de compra**: hoje o estoque é o que o canal
+  informa por anúncio; não há controle próprio de galpão nem reposição.
+- **Previsão de demanda e ruptura preditiva**.
+- **Simulador de precificação** por margem-alvo.
+- **Emissão de NF-e e integração contábil** (Omie, Bling, Conta Azul, SPED).
+- **Novos canais** (Amazon, Magalu, Shopify). O modelo canônico foi desenhado
+  para isso: cada canal novo é um pacote de conector, sem tocar em domínio nem
+  interface.
+
+### O que **não** falta
+
+Vale o registro, porque é o que costuma faltar em sistema parecido: cálculo
+financeiro do bruto ao lucro real, imposto do Simples progressivo por RBT12,
+custo de aquisição com frete de compra, conciliação com procedência do valor,
+CRUD completo com regras de exclusão, multi-tenant com isolamento testado,
+idempotência de webhook e sync, cofre de tokens cifrado, trilha de auditoria, e
+migrations que sobrevivem a um banco com dados.
+
+---
+
+## 15.7 Limitações que permanecem
 
 Nenhuma delas é contornável por código — todas dependem de terceiros:
 
@@ -273,7 +327,7 @@ Nenhuma delas é contornável por código — todas dependem de terceiros:
 
 ---
 
-## 15.7 Como reproduzir esta auditoria
+## 15.8 Como reproduzir esta auditoria
 
 ```bash
 # Backend — 177 testes
