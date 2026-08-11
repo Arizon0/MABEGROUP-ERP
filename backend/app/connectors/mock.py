@@ -255,7 +255,15 @@ class ConectorMock:
             payment_fee=taxa_pagamento,
             net_amount=liquido,
             net_source=fonte,
-            buyer_external_id=str(rnd.randint(10**8, 10**9)),
+            # Cerca de um terço das vendas vai para um comprador recorrente.
+            # Sortear um comprador novo a cada pedido produziria uma base sem
+            # nenhuma recompra, e a análise de coorte — que existe justamente
+            # para medir isso — apareceria vazia na demonstração.
+            buyer_external_id=str(
+                rnd.randint(10**8, 10**8 + 400)
+                if rnd.random() < 0.35
+                else rnd.randint(10**8, 10**9)
+            ),
             buyer_nickname=f"COMPRADOR{rnd.randint(1000, 9999)}",
             ship_state=estado,
             ship_city=rnd.choice(CIDADES[estado]),

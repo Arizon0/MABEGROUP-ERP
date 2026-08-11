@@ -7,12 +7,15 @@ import type {
   Cascata,
   Conta,
   ContasAReceber,
+  Coorte,
+  CurvaABC,
   Despesa,
   Divergencia,
   DRE,
   Filtros,
   ListaPedidos,
   Mapeamento,
+  MediaMovel,
   MesDRE,
   LinhaProduto,
   Pendencia,
@@ -472,3 +475,24 @@ export const useRatearFrete = () =>
   }>((dados) =>
     api('/catalog/products/freight-in', { method: 'POST', body: JSON.stringify(dados) }),
   )
+
+export const useCurvaABC = (f: Filtros, limite = 500) =>
+  useQuery({
+    queryKey: ['abc', f, limite],
+    queryFn: () => api<CurvaABC>('/reports/abc', { params: { ...f, limite } }),
+    ...PADRAO,
+  })
+
+export const useCoorte = (meses = 12, channel?: string) =>
+  useQuery({
+    queryKey: ['cohort', meses, channel ?? 'todos'],
+    queryFn: () => api<Coorte>('/reports/cohort', { params: { meses, channel } }),
+    ...PADRAO,
+  })
+
+export const useMediaMovel = (f: Filtros, janela = 7) =>
+  useQuery({
+    queryKey: ['moving-average', f, janela],
+    queryFn: () => api<MediaMovel>('/reports/moving-average', { params: { ...f, janela } }),
+    ...PADRAO,
+  })

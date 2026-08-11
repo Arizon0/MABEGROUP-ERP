@@ -38,6 +38,17 @@
 
   --grid: #ebeae5;
 
+  /* Rampa ordinal de uma só matiz — classes ABC e faixas de retenção medem
+     magnitude, não identidade, então a codificação correta é sequencial e não
+     categórica. Validada com scripts/validate_palette.js --ordinal nos dois
+     modos: matiz única, luminosidade monotônica, degraus visíveis e a ponta
+     clara acima de 2:1 contra a superfície. */
+  --ramp-1: #86b6ef;
+  --ramp-2: #5598e7;
+  --ramp-3: #2a78d6;
+  --ramp-4: #1c5cab;
+  --ramp-5: #0d366b;
+
   /* Variantes suaves: o modificador de opacidade do Tailwind não se aplica a
      valores em `var()`, então cada tom derivado é um token explícito. */
   --brand-soft: color-mix(in srgb, var(--series-1) 12%, transparent);
@@ -77,6 +88,15 @@
     --status-critical: #e66767;
 
     --grid: #2c2c29;
+
+    /* No escuro a rampa inverte o sentido: os degraus escuros é que recuam
+       contra a superfície, então a progressão anda para o claro. Não é o
+       espelho automático do modo claro — foi validada separadamente. */
+    --ramp-1: #184f95;
+    --ramp-2: #256abf;
+    --ramp-3: #5598e7;
+    --ramp-4: #9ec5f4;
+    --ramp-5: #cde2fb;
 
     /* Variantes suaves: o modificador de opacidade do Tailwind não se aplica a
        valores em `var()`, então cada tom derivado é um token explícito. */
@@ -174,6 +194,20 @@ body {
   }
   .num {
     @apply font-mono tabular-nums;
+  }
+}
+
+@layer base {
+  /* Item de grid nasce com ``min-width: auto`` e se recusa a encolher abaixo do
+     conteúdo. Basta uma tabela larga dentro de um cartão para a faixa inteira
+     esticar e a página passar a rolar na horizontal — o defeito de
+     responsividade mais comum e o que menos aparece no desktop, porque só se
+     manifesta quando a tela é menor que o conteúdo.
+
+     Vale só para grid: em flex, ``min-width: 0`` deixaria botões de barra de
+     ferramentas serem espremidos, então lá o ajuste é pontual. */
+  .grid > * {
+    min-width: 0;
   }
 }
 

@@ -346,3 +346,63 @@ export interface ContasAReceber {
   }[]
   observacao: string
 }
+
+// --- Análises ----------------------------------------------------------------
+
+export interface ItemABC {
+  posicao: number
+  sku: string
+  titulo: string
+  classe: 'A' | 'B' | 'C'
+  unidades: string
+  receita_bruta: string
+  margem_bruta: string
+  participacao_pct: string
+  acumulado_pct: string
+}
+
+export interface CurvaABC {
+  total_receita: string
+  total_itens: number
+  itens: ItemABC[]
+  resumo: {
+    classe: string
+    itens: number
+    itens_pct: string
+    receita: string
+    receita_pct: string
+    margem: string
+  }[]
+}
+
+export interface Coorte {
+  coortes: {
+    coorte: string
+    base: number
+    periodos: { offset: number; compradores: number; retencao_pct: string; receita: string }[]
+  }[]
+  cobertura: {
+    pedidos_com_comprador_pct: string
+    pedidos_sem_comprador: number
+    aviso: string
+  }
+}
+
+export interface MediaMovel {
+  janela: number
+  pontos: {
+    bucket: string
+    pedidos: number
+    receita_bruta: string
+    receita_liquida: string
+    cancelados: number
+    media_movel_receita: string | null
+    media_movel_pedidos: string | null
+  }[]
+  tendencia: {
+    direcao: 'alta' | 'queda' | 'estável' | 'indefinida'
+    variacao_pct: string
+    media_atual?: string
+    media_inicial?: string
+  }
+}

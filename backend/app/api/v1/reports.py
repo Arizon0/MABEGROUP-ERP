@@ -1,4 +1,4 @@
-"""Exportação de relatórios em CSV, XLSX e PDF."""
+"""Relatórios analíticos e exportação em CSV e XLSX."""
 from __future__ import annotations
 
 import csv
@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import AnalistaDep, DbDep
+from app.core.deps import AnalistaDep, CtxDep, DbDep
 from app.core.errors import ErroDominio
 from app.models.order import Order
 from app.services import analytics, audit, reconciliation
@@ -233,3 +233,77 @@ async def formatos() -> dict[str, Any]:
             )
         },
     }
+
+
+# --- Análises ----------------------------------------------------------------
+
+def _filtro(ctx, inicio, fim, channel, sku=None) -> analytics.Filtro:
+    ini, f = analytics.normalizar_periodo(inicio, fim)
+    return analytics.Filtro(
+        tenant_id=ctx.tenant_id, inicio=ini, fim=f, channel=channel, sku=sku
+    )
+
+
+@router.get(
+    "/abc",
+    summary="Curva ABC de produtos",
+    description=(
+        "Classifica os SKUs pela participação **acumulada** na receita: A até "
+        "80%, B até 95%, C o resto. O corte é sobre o acumulado e não sobre a "
+        "posição no ranking — o que interessa é quantos itens sustentam o "
+        "faturamento, e esse número varia de operação para operação."
+    ),
+)
+async def curva_abc(
+    ctx: CtxDep,
+    db: DbDep,
+    inicio: datetime | None = None,
+    fim: datetime | None = None,
+    channel: str | None = None,
+    limite: int = Query(500, ge=10, le=2000),
+) -> dict[str, Any]:
+    return await analytics.curva_abc(db, _filtro(ctx, inicio, fim, channel), limite=limite)
+
+
+@router.get(
+    "/cohort",
+    summary="Coorte de compradores por mês da primeira compra",
+    description=(
+        "Retenção por grupo: cada linha é quem comprou pela primeira vez num "
+        "mês, cada coluna é quantos voltaram nos meses seguintes. Usa "
+        "`buyer_hash`, identificador derivado sem dado pessoal; pedidos de canal "
+        "que não expõe comprador ficam de fora e a cobertura é informada."
+    ),
+)
+async def coorte(
+    ctx: CtxDep,
+    db: DbDep,
+    meses: int = Query(12, ge=2, le=36),
+    channel: str | None = None,
+) -> dict[str, Any]:
+    return await analytics.coorte_de_compradores(
+        db, ctx.tenant_id, meses=meses, canal=channel
+    )
+
+
+@router.get(
+    "/moving-average",
+    summary="Série diária com média móvel",
+    description=(
+        "A média móvel remove o ciclo semanal: venda de autopeça cai no fim de "
+        "semana e sobe na segunda, e olhar o dia isolado faz toda segunda "
+        "parecer crescimento. Os primeiros dias saem sem média, em vez de uma "
+        "média parcial exibida como se fosse cheia."
+    ),
+)
+async def media_movel(
+    ctx: CtxDep,
+    db: DbDep,
+    inicio: datetime | None = None,
+    fim: datetime | None = None,
+    channel: str | None = None,
+    janela: int = Query(7, ge=2, le=90),
+) -> dict[str, Any]:
+    return await analytics.serie_com_media_movel(
+        db, _filtro(ctx, inicio, fim, channel), janela=janela
+    )

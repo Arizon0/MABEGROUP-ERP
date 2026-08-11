@@ -658,3 +658,301 @@ __all__ = [
     "normalizar_periodo",
     "periodo_padrao",
 ]
+
+
+# --- Curva ABC, coorte e média móvel -----------------------------------------
+
+#: Cortes clássicos de Pareto sobre a receita acumulada.
+CORTE_A = Decimal("80")
+CORTE_B = Decimal("95")
+
+
+async def curva_abc(
+    db: AsyncSession, filtro: Filtro, *, limite: int = 500
+) -> dict[str, Any]:
+    """Classifica os SKUs por participação acumulada na receita.
+
+    Classe **A** vai até 80% da receita acumulada, **B** até 95%, **C** o resto.
+    O corte é sobre o acumulado, não sobre a posição no ranking: o que importa
+    é quantos itens sustentam o faturamento, e esse número varia — pode ser 12%
+    do catálogo ou 40%, e é justamente isso que a análise revela.
+
+    A consolidação é por ``sku_base``, de modo que o mesmo produto anunciado em
+    vários canais conte uma vez só. Sem isso, um produto dividido em seis
+    anúncios apareceria seis vezes na cauda e nunca na classe A.
+    """
+    chave = func.coalesce(OrderItem.sku_base, OrderItem.sku_channel)
+    linhas = (
+        await db.execute(
+            filtro.aplicar(
+                select(
+                    chave.label("sku"),
+                    func.min(OrderItem.title),
+                    func.sum(OrderItem.quantity),
+                    func.sum(OrderItem.gross_amount),
+                    func.sum(OrderItem.cogs),
+                ).join(Order, Order.id == OrderItem.order_id)
+            )
+            .where(Order.status != StatusPedido.CANCELADO)
+            .group_by("sku")
+            .order_by(func.sum(OrderItem.gross_amount).desc())
+            .limit(limite)
+        )
+    ).all()
+
+    total = sum((_d(l[3]) for l in linhas), Decimal("0"))
+    itens: list[dict[str, Any]] = []
+    acumulado = Decimal("0")
+    resumo = {
+        classe: {"itens": 0, "receita": Decimal("0"), "margem": Decimal("0")}
+        for classe in ("A", "B", "C")
+    }
+
+    for posicao, (sku, titulo, unidades, receita, cmv) in enumerate(linhas, start=1):
+        valor = _d(receita)
+
+        # A classe sai do acumulado **antes** de somar o item: quem cruza os 80%
+        # é o item que fecha a fatia vital, e pertence a ela. Classificar pelo
+        # acumulado já somado jogaria o último item sempre para C — inclusive
+        # numa operação de produto único, onde o item que é o negócio inteiro
+        # apareceria como irrelevante.
+        anterior_pct = (acumulado / total * 100) if total else Decimal("0")
+        classe = "A" if anterior_pct < CORTE_A else "B" if anterior_pct < CORTE_B else "C"
+
+        acumulado += valor
+        pct_acumulado = (acumulado / total * 100) if total else Decimal("0")
+
+        margem = valor - _d(cmv)
+        resumo[classe]["itens"] += 1
+        resumo[classe]["receita"] += valor
+        resumo[classe]["margem"] += margem
+
+        itens.append(
+            {
+                "posicao": posicao,
+                "sku": str(sku or "—"),
+                "titulo": str(titulo or ""),
+                "classe": classe,
+                "unidades": str(_d(unidades)),
+                "receita_bruta": str(arredondar(valor)),
+                "margem_bruta": str(arredondar(margem)),
+                "participacao_pct": str(arredondar(valor / total * 100)) if total else "0.00",
+                "acumulado_pct": str(arredondar(pct_acumulado)),
+            }
+        )
+
+    return {
+        "total_receita": str(arredondar(total)),
+        "total_itens": len(itens),
+        "itens": itens,
+        "resumo": [
+            {
+                "classe": classe,
+                "itens": dados["itens"],
+                "itens_pct": str(
+                    arredondar(Decimal(dados["itens"]) / Decimal(len(itens)) * 100)
+                )
+                if itens
+                else "0.00",
+                "receita": str(arredondar(dados["receita"])),
+                "receita_pct": str(arredondar(dados["receita"] / total * 100))
+                if total
+                else "0.00",
+                "margem": str(arredondar(dados["margem"])),
+            }
+            for classe, dados in resumo.items()
+        ],
+    }
+
+
+async def coorte_de_compradores(
+    db: AsyncSession, tenant_id: int, *, meses: int = 12, canal: str | None = None
+) -> dict[str, Any]:
+    """Retenção por mês da primeira compra.
+
+    Cada linha é o grupo que comprou pela primeira vez num mês; as colunas são
+    os meses seguintes. O valor é quantos daquele grupo voltaram a comprar.
+
+    Depende de ``buyer_hash`` — identificador derivado, sem dado pessoal. Onde
+    o canal não expõe comprador algum, o pedido fica de fora e isso é dito no
+    retorno em vez de diluído: uma retenção calculada sobre metade da base
+    pareceria baixa por motivo errado.
+    """
+    limite = _somar_meses(datetime.now(UTC).replace(day=1), -(meses - 1))
+
+    consulta = select(
+        Order.buyer_hash,
+        func.min(Order.date_created).label("primeira"),
+        Order.date_created,
+        Order.gross_amount,
+    ).where(
+        Order.tenant_id == tenant_id,
+        Order.status != StatusPedido.CANCELADO,
+        Order.buyer_hash.is_not(None),
+    )
+    if canal:
+        consulta = consulta.where(Order.channel == canal)
+
+    linhas = (await db.execute(consulta.group_by(Order.id, Order.buyer_hash))).all()
+
+    # O SQLite devolve datetime sem fuso e o Postgres com fuso. Comparar os dois
+    # levanta TypeError, então tudo é normalizado para UTC antes de qualquer
+    # comparação — o bug só apareceria no ambiente de desenvolvimento.
+    primeira_compra: dict[str, datetime] = {}
+    for comprador, _min, quando, _valor in linhas:
+        atual = primeira_compra.get(comprador)
+        quando = _aware(quando)
+        if atual is None or quando < atual:
+            primeira_compra[comprador] = quando
+
+    # grade[coorte][offset] = conjunto de compradores distintos
+    grade: dict[str, dict[int, set[str]]] = {}
+    receita: dict[str, dict[int, Decimal]] = {}
+
+    for comprador, _min, quando, valor in linhas:
+        quando = _aware(quando)
+        origem = primeira_compra[comprador].replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        if origem < limite:
+            continue
+        rotulo = origem.date().isoformat()[:7]
+        offset = (quando.year - origem.year) * 12 + (quando.month - origem.month)
+        grade.setdefault(rotulo, {}).setdefault(offset, set()).add(comprador)
+        receita.setdefault(rotulo, {}).setdefault(offset, Decimal("0"))
+        receita[rotulo][offset] += _d(valor)
+
+    total_pedidos = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.tenant_id == tenant_id, Order.status != StatusPedido.CANCELADO
+        )
+    )
+    sem_comprador = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.tenant_id == tenant_id,
+            Order.status != StatusPedido.CANCELADO,
+            Order.buyer_hash.is_(None),
+        )
+    )
+
+    coortes = []
+    for rotulo in sorted(grade):
+        base = len(grade[rotulo].get(0, set()))
+        if not base:
+            continue
+        periodos = []
+        for offset in range(0, max(grade[rotulo]) + 1):
+            compradores = len(grade[rotulo].get(offset, set()))
+            periodos.append(
+                {
+                    "offset": offset,
+                    "compradores": compradores,
+                    "retencao_pct": str(
+                        arredondar(Decimal(compradores) / Decimal(base) * 100)
+                    ),
+                    "receita": str(arredondar(receita[rotulo].get(offset, Decimal("0")))),
+                }
+            )
+        coortes.append({"coorte": rotulo, "base": base, "periodos": periodos})
+
+    cobertura = (
+        arredondar(
+            Decimal(int(total_pedidos or 0) - int(sem_comprador or 0))
+            / Decimal(int(total_pedidos or 1))
+            * 100
+        )
+        if total_pedidos
+        else Decimal("0")
+    )
+
+    return {
+        "coortes": coortes,
+        "cobertura": {
+            "pedidos_com_comprador_pct": str(cobertura),
+            "pedidos_sem_comprador": int(sem_comprador or 0),
+            "aviso": (
+                f"{sem_comprador} pedidos sem identificador de comprador ficaram de "
+                f"fora: o canal não o expõe. A retenção abaixo vale para os "
+                f"{cobertura}% restantes."
+            )
+            if sem_comprador
+            else "",
+        },
+    }
+
+
+async def serie_com_media_movel(
+    db: AsyncSession, filtro: Filtro, *, janela: int = 7
+) -> dict[str, Any]:
+    """Série diária com média móvel — a tendência sem o ruído do dia da semana.
+
+    Venda de autopeça cai no fim de semana e sobe na segunda. Olhar o dia
+    isolado faz toda segunda parecer crescimento e todo sábado, queda. A média
+    móvel de 7 dias remove exatamente esse ciclo, porque a janela cobre uma
+    semana inteira.
+
+    Os primeiros ``janela - 1`` dias saem com média nula em vez de uma média
+    parcial: uma média de dois dias exibida como se fosse de sete inventaria
+    uma tendência que ninguém mediu.
+    """
+    serie = await serie_temporal(db, filtro, "day")
+    janela = max(2, janela)
+
+    pontos: list[dict[str, Any]] = []
+    for indice, ponto in enumerate(serie):
+        if indice + 1 >= janela:
+            trecho = serie[indice + 1 - janela : indice + 1]
+            media_receita = sum(
+                (Decimal(p["receita_bruta"]) for p in trecho), Decimal("0")
+            ) / Decimal(janela)
+            media_pedidos = Decimal(sum(p["pedidos"] for p in trecho)) / Decimal(janela)
+        else:
+            media_receita = media_pedidos = None
+
+        pontos.append(
+            {
+                **ponto,
+                "media_movel_receita": str(arredondar(media_receita))
+                if media_receita is not None
+                else None,
+                "media_movel_pedidos": str(arredondar(media_pedidos))
+                if media_pedidos is not None
+                else None,
+            }
+        )
+
+    return {"janela": janela, "pontos": pontos, "tendencia": _tendencia(pontos)}
+
+
+def _tendencia(pontos: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compara a média móvel mais recente com a de uma janela atrás.
+
+    Comparar duas médias móveis, e não dois dias, é o ponto: a diferença entre
+    ontem e hoje é ruído; a diferença entre duas semanas suavizadas é sinal.
+    """
+    com_media = [p for p in pontos if p["media_movel_receita"] is not None]
+    if len(com_media) < 2:
+        return {"direcao": "indefinida", "variacao_pct": "0.00"}
+
+    atual = Decimal(com_media[-1]["media_movel_receita"])
+    anterior = Decimal(com_media[0]["media_movel_receita"])
+    if anterior <= 0:
+        return {"direcao": "indefinida", "variacao_pct": "0.00"}
+
+    variacao = (atual - anterior) / anterior * 100
+    return {
+        "direcao": "alta" if variacao > 2 else "queda" if variacao < -2 else "estável",
+        "variacao_pct": str(arredondar(variacao)),
+        "media_atual": str(arredondar(atual)),
+        "media_inicial": str(arredondar(anterior)),
+    }
+
+
+def _somar_meses(quando: datetime, delta: int) -> datetime:
+    total = (quando.year * 12 + quando.month - 1) + delta
+    return quando.replace(year=total // 12, month=total % 12 + 1, day=1)
+
+
+def _aware(quando: datetime) -> datetime:
+    """Garante fuso. O SQLite devolve naive; o Postgres, aware."""
+    return quando if quando.tzinfo else quando.replace(tzinfo=UTC)

@@ -143,9 +143,15 @@ export function Secao({
   children: ReactNode
 }) {
   return (
-    <section className="card">
-      <header className="mb-3 flex items-start justify-between gap-3">
-        <div>
+    // ``min-w-0`` não é decorativo: item de grid ou flex nasce com
+    // ``min-width: auto``, então uma tabela larga aqui dentro empurra a faixa
+    // inteira e a página passa a rolar na horizontal no celular. É o defeito de
+    // responsividade mais comum e o mais fácil de não notar no desktop.
+    <section className="card min-w-0">
+      {/* ``flex-wrap``: em tela estreita a ação desce para baixo do título em
+          vez de espremê-lo ou vazar para fora do cartão. */}
+      <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="card-title">{titulo}</h2>
           {descricao && <p className="card-sub mt-0.5">{descricao}</p>}
         </div>
@@ -192,7 +198,10 @@ export function Tabela({
   vazio?: boolean
 }) {
   return (
-    <div className="overflow-x-auto">
+    // ``min-w-0`` no contêiner de rolagem: sem ele o ``overflow-x-auto`` não
+    // tem efeito, porque o próprio contêiner cresce até caber a tabela em vez
+    // de recortá-la e rolar.
+    <div className="w-full min-w-0 overflow-x-auto">
       <table className="w-full min-w-[640px] border-collapse">
         <thead className="border-b border-line">
           <tr>

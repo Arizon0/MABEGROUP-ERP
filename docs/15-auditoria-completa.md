@@ -12,12 +12,12 @@ nada.
 
 | Dimensão | Situação |
 |---|---|
-| Testes automatizados | **197 passando**, 13 pulados (métodos que um canal genuinamente não implementa) |
-| Endpoints REST | 84 — sendo 33 de escrita |
+| Testes automatizados | **219 passando**, 13 pulados (métodos que um canal genuinamente não implementa) |
+| Endpoints REST | 87 — sendo 33 de escrita |
 | Tabelas | 42, sem divergência entre modelos e migrations |
 | Abas do painel | 11 |
 | Build do frontend | Limpo (`tsc --noEmit` + `vite build`), 17 testes passando |
-| Defeitos encontrados nesta auditoria | 8 — todos corrigidos |
+| Defeitos encontrados nesta auditoria | 11 — todos corrigidos |
 
 Os 13 testes pulados não são cobertura faltante: o contrato de conectores
 percorre todos os métodos de todos os canais e pula o que não existe naquele
@@ -134,6 +134,30 @@ que mais custam para trazer.
 **Correção.** `freight_in_cost` e `other_acquisition_cost` no produto, ambos no
 CMV congelado da venda, e um endpoint de **rateio do frete da nota** por
 quantidade ou por valor, com simulação antes de aplicar.
+
+### 9. Classificação ABC jogava o produto único para a classe C
+
+**Gravidade: média.** O corte olhava o acumulado **depois** de somar o item, e o
+último SKU sempre fecha em 100% — então numa operação de produto único, o item
+que é o negócio inteiro sairia classificado como cauda irrelevante. Corrigido
+para classificar pelo acumulado **antes** do item: quem cruza os 80% é quem
+fecha a fatia vital e pertence a ela.
+
+### 10. Endpoint de contas a receber caía com 500
+
+**Gravidade: alta.** `money_release_date` volta sem fuso no SQLite e com fuso no
+Postgres; subtrair os dois levanta `TypeError` e derruba a rota inteira.
+Encontrado ao abrir o painel de verdade no navegador — **o teste passava** porque
+rodava contra base sem nenhum pagamento com data de liberação. O teste foi
+reescrito com pagamentos em todas as faixas de prazo, que é o que o exercita.
+
+### 11. Página rolava 300px na horizontal no celular
+
+**Gravidade: média.** Item de grid nasce com `min-width: auto` e não encolhe
+abaixo do conteúdo: uma tabela larga dentro de um cartão esticava a faixa
+inteira. Afetava três abas e só se manifestava abaixo de 1024px. Corrigido no
+sistema — regra de base para grid, `min-w-0` no componente de seção e no
+contêiner de rolagem da tabela — e não página a página. Ver docs/17.
 
 ### 8. CMV divergente entre ingestão e remapeamento de SKU
 
@@ -267,7 +291,6 @@ significados muito diferentes aqui.
 | **Exportação em PDF** | Anunciada, não implementada. O endpoint `/reports/formats` chegava a listar `pdf` enquanto as rotas o rejeitavam com 422 — corrigido para não prometer o que não entrega | Baixo: XLSX cobre o uso, e o PDF sai da planilha |
 | **Alerta por e-mail e webhook** | As regras existem e disparam, mas o alerta só aparece no painel e no feed ao vivo | Médio: alerta que exige olhar a tela não avisa de madrugada |
 | **Mensagens pós-venda** | O modelo `messages` existe e a tabela é criada, mas nada popula: não há `fetch_messages` no conector nem recurso no sync | Médio: perguntas pré-venda são sincronizadas; a conversa pós-venda não |
-| **Curva ABC, coorte e média móvel** | Descritas na aba de Relatórios, sem implementação | Baixo: são análises derivadas do que já está no banco |
 | **Mapa do Brasil por estado** | A aba de Logística agrega por UF em tabela, não em mapa | Cosmético |
 | **Exportação assíncrona** | Tudo é síncrono em streaming. Aguenta centenas de milhares de linhas, mas não milhões | Baixo até o volume crescer muito |
 

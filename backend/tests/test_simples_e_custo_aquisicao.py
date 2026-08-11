@@ -281,11 +281,57 @@ class TestRateioDeFrete:
 
 
 class TestContasAReceber:
-    async def test_soma_pendente_e_separa_liberado(self, cliente):
+    async def test_base_vazia_responde_zerada(self, cliente):
         resposta = await cliente.get("/api/v1/finance/receivables")
         assert resposta.status_code == 200
         corpo = resposta.json()
-        assert "total_a_receber" in corpo["resumo"]
+        assert corpo["resumo"]["total_a_receber"] == "0.00"
         assert set(corpo["por_faixa"]) == {
             "vencido", "ate_7_dias", "ate_30_dias", "acima_de_30", "sem_previsao",
         }
+
+    async def test_classifica_por_faixa_de_prazo(self, cliente, db, conta):
+        """Com pagamentos reais dentro — sem eles o endpoint nem era exercitado.
+
+        A primeira versão deste teste rodava contra base vazia e passava mesmo
+        com o endpoint quebrado: só a presença de uma data de liberação
+        disparava o erro de fuso que derrubava a rota inteira.
+        """
+        from app.models.enums import StatusPagamento
+        from app.models.finance import Payment
+
+        agora = datetime.now(UTC)
+        casos = [
+            ("vencido", agora - timedelta(days=3), "pending", "100.00"),
+            ("proximo", agora + timedelta(days=3), "pending", "200.00"),
+            ("mes", agora + timedelta(days=20), "pending", "300.00"),
+            ("longe", agora + timedelta(days=60), "pending", "400.00"),
+            ("sem_data", None, "pending", "500.00"),
+            ("liberado", agora - timedelta(days=10), "released", "600.00"),
+        ]
+        for indice, (nome, liberacao, situacao, valor) in enumerate(casos):
+            db.add(
+                Payment(
+                    tenant_id=conta.tenant_id,
+                    channel_account_id=conta.id,
+                    external_id=f"pag-{nome}-{indice}",
+                    provider="mercadopago",
+                    status=StatusPagamento.APROVADO,
+                    net_received_amount=Decimal(valor),
+                    money_release_date=liberacao,
+                    money_release_status=situacao,
+                )
+            )
+        await db.commit()
+
+        corpo = (await cliente.get("/api/v1/finance/receivables")).json()
+        faixas = corpo["por_faixa"]
+
+        assert faixas["vencido"] == "100.00"
+        assert faixas["ate_7_dias"] == "200.00"
+        assert faixas["ate_30_dias"] == "300.00"
+        assert faixas["acima_de_30"] == "400.00"
+        assert faixas["sem_previsao"] == "500.00"
+        # Liberado já entrou na conta: não é saldo a receber.
+        assert corpo["resumo"]["total_a_receber"] == "1500.00"
+        assert corpo["resumo"]["total_ja_liberado"] == "600.00"

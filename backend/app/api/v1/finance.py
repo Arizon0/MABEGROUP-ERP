@@ -346,6 +346,10 @@ async def contas_a_receber(ctx: CtxDep, db: DbDep) -> dict[str, Any]:
         if liberacao is None:
             faixas["sem_previsao"] += montante
         else:
+            # O SQLite devolve datetime sem fuso e o Postgres com fuso; subtrair
+            # os dois levanta TypeError e derruba o endpoint inteiro.
+            if liberacao.tzinfo is None:
+                liberacao = liberacao.replace(tzinfo=UTC)
             dias = (liberacao - hoje).days
             if dias < 0:
                 # Data de liberação no passado e status ainda pendente: ou o
