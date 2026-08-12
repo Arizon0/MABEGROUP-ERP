@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from app.core.config import settings
 from app.connectors.base import (
     AccountInfo,
     CanonicalFee,
@@ -132,7 +133,8 @@ class ConectorMock:
         rnd = self._rnd(f"pedidos:{since.date()}:{until.date()}")
         dias = max(1, (until - since).days)
         # Volume compatível com a operação real: ML vende ~3× mais que Shopee.
-        por_dia = 11 if self.channel == Canal.MERCADO_LIVRE else 4
+        base = max(1, settings.MOCK_ORDERS_PER_DAY)
+        por_dia = base if self.channel == Canal.MERCADO_LIVRE else max(1, round(base / 3))
 
         pedidos: list[CanonicalOrder] = []
         for dia in range(dias):

@@ -25,6 +25,12 @@ os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_ARQUIVO_DB}")
 os.environ.setdefault("REDIS_URL", "")
 os.environ.setdefault("SEED_ON_STARTUP", "0")
 os.environ.setdefault("SECRET_KEY", "chave-de-teste-nao-usar-em-producao-000000")
+# Volume simulado enxuto: provar a regra não exige mil pedidos, exige os casos
+# certos. Com o padrão de produção cada sincronização gerava ~990 pedidos e a
+# suíte levava mais de oito minutos — tempo pago em toda iteração, sem comprar
+# nenhuma cobertura.
+os.environ.setdefault("MOCK_ORDERS_PER_DAY", "2")
+os.environ.setdefault("BACKFILL_DAYS", "30")
 
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402

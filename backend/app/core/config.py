@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     WEBHOOK_MAX_ATTEMPTS: int = 6
     SYNC_OVERLAP_MINUTES: int = 5
     BACKFILL_DAYS: int = 90
+    #: Pedidos por dia que o conector simulado gera, por canal do Mercado Livre
+    #: (a Shopee usa a proporção real, ~1/3 disso). O padrão reproduz o volume
+    #: da operação real para a demonstração; a suíte de testes baixa este valor,
+    #: porque provar a regra não exige mil pedidos — exige os casos certos, e
+    #: gerar volume só faz cada teste pagar segundos que não compram nada.
+    MOCK_ORDERS_PER_DAY: int = 11
 
     # --- Conciliação ---------------------------------------------------------
     RECONCILIATION_TOLERANCE: str = "0.01"
