@@ -87,6 +87,12 @@ def _janela(cursor: SyncCursor) -> tuple[datetime, datetime]:
     return inicio - timedelta(minutes=settings.SYNC_OVERLAP_MINUTES), agora
 
 
+#: Pedidos gravados por transação durante o backfill. Lote pequeno demais paga
+#: um commit por pedido; grande demais devolve ao ponto de perder muito trabalho
+#: numa falha. Cinquenta mantém a perda máxima em segundos de trabalho.
+TAMANHO_DO_LOTE = 50
+
+
 async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> ResultadoSync:
     """Sincroniza pedidos alterados desde a última marca d'água."""
     import time
@@ -108,7 +114,13 @@ async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> Result
         )
 
         maior_atualizacao = cursor.last_synced_at
-        for canonico in pedidos:
+        # Gravar em lotes, e não só no fim: um backfill de 90 dias percorre
+        # centenas de pedidos, e um único commit ao final significa que uma
+        # falha no pedido 690 de 700 descarta os 689 já importados — o
+        # ``rollback`` do except leva tudo junto. Com lote, o que já entrou
+        # fica, o painel mostra progresso enquanto roda, e a reexecução retoma
+        # de onde parou em vez de começar do zero.
+        for indice, canonico in enumerate(pedidos, start=1):
             envio, pagamentos = await _coletar_complementos(conta, conector, token, canonico)
 
             # O pedido precisa existir ANTES de envio e pagamento: os dois se
@@ -131,6 +143,17 @@ async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> Result
                 referencia = referencia.replace(tzinfo=UTC)
             if referencia and (maior_atualizacao is None or referencia > _aware(maior_atualizacao)):
                 maior_atualizacao = referencia
+
+            if indice % TAMANHO_DO_LOTE == 0:
+                cursor.last_synced_at = maior_atualizacao or cursor.last_synced_at
+                cursor.progress_pct = int(indice / len(pedidos) * 100)
+                await db.commit()
+                log.info(
+                    "sync_pedidos_parcial",
+                    conta=conta.id,
+                    processados=indice,
+                    total=len(pedidos),
+                )
 
         # Avança pela maior data observada, não por ``now()``: gravar o relógio
         # local abriria uma janela cega do tamanho da própria sincronização.
@@ -159,6 +182,47 @@ async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> Result
     resultado.duracao_s = time.monotonic() - inicio_exec
     log.info("sync_pedidos", conta=conta.id, **resultado.como_dict())
     return resultado
+
+
+#: Falhas consecutivas de detalhe de pagamento por conta, dentro do processo.
+_FALHAS_DE_PAGAMENTO: dict[int, int] = {}
+
+#: A partir daqui o detalhe de pagamento para de ser tentado nesta execução.
+LIMITE_DE_FALHAS_DE_PAGAMENTO = 5
+
+
+def desistir_de_pagamentos(conta_id: int) -> bool:
+    return _FALHAS_DE_PAGAMENTO.get(conta_id, 0) >= LIMITE_DE_FALHAS_DE_PAGAMENTO
+
+
+def _contar_falha_de_pagamento(conta: ChannelAccount) -> None:
+    """Interrompe a busca de detalhe de pagamento após falhas seguidas.
+
+    ``/v1/payments/{id}`` pertence ao Mercado Pago. Quando só o Mercado Livre
+    está conectado, o token não alcança o recurso e **toda** chamada volta 404 —
+    um terço das requisições do backfill gasto em respostas inúteis, que ainda
+    consomem cota de limite de uso.
+
+    O contador zera assim que um pagamento é obtido com sucesso, e o estado não
+    é persistido: cada execução recomeça a tentar, então conectar o Mercado Pago
+    depois volta a enriquecer os pedidos sozinho, sem intervenção.
+
+    O pedido não perde valor com isso: bruto, líquido e taxas já vêm no próprio
+    payload do pedido. O detalhe adiciona a quebra de tarifas, não o total.
+    """
+    atual = _FALHAS_DE_PAGAMENTO.get(conta.id, 0) + 1
+    _FALHAS_DE_PAGAMENTO[conta.id] = atual
+    if atual == LIMITE_DE_FALHAS_DE_PAGAMENTO:
+        log.warning(
+            "detalhe_de_pagamento_desativado",
+            conta=conta.id,
+            canal=conta.channel,
+            motivo=(
+                "falhas consecutivas ao buscar o detalhe do pagamento; no "
+                "Mercado Livre isso normalmente significa que o Mercado Pago "
+                "não está conectado. Os totais do pedido não dependem disso."
+            ),
+        )
 
 
 async def _coletar_complementos(
@@ -196,13 +260,17 @@ async def _coletar_complementos(
                 pagamentos.append(escrow)
         except Exception:
             pass  # antes da conclusão do pedido o escrow ainda não existe
-    else:
+    elif not desistir_de_pagamentos(conta.id):
         for id_pagamento in getattr(canonico, "external_payment_ids", []) or []:
             try:
                 pagamento = await conector.fetch_payment(token, id_pagamento)
                 if pagamento:
                     pagamentos.append(pagamento)
+                    _FALHAS_DE_PAGAMENTO.pop(conta.id, None)
+                else:
+                    _contar_falha_de_pagamento(conta)
             except Exception as exc:
+                _contar_falha_de_pagamento(conta)
                 log.debug("enriquecimento_pagamento_falhou", id=id_pagamento, erro=str(exc))
 
     if pagamentos:

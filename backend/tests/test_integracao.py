@@ -154,3 +154,41 @@ async def test_rollup_reproduz_o_total_da_consulta_direta(db, conta):
     )
 
     assert abs(Decimal(str(direto)) - Decimal(str(do_rollup))) < Decimal("0.05")
+
+
+async def test_backfill_confirma_em_lotes(db, conta, monkeypatch):
+    """Um backfill longo grava em etapas, não tudo no fim.
+
+    Com commit único ao final, uma falha no pedido 690 de 700 levava os 689 já
+    importados junto no rollback, e a reexecução recomeçava do zero. Aqui a
+    prova é direta: mais de uma confirmação ao longo da importação.
+    """
+    commits = {"n": 0}
+    original = db.commit
+
+    async def contar():
+        commits["n"] += 1
+        await original()
+
+    monkeypatch.setattr(db, "commit", contar)
+
+    resultado = await sync.sincronizar_pedidos(db, conta)
+    assert resultado.criados > sync.TAMANHO_DO_LOTE, (
+        "o cenário precisa de mais pedidos que o tamanho do lote para ser válido"
+    )
+    assert commits["n"] > 1, "houve uma única confirmação — o lote não está funcionando"
+
+
+async def test_para_de_buscar_pagamento_apos_falhas_seguidas(db, conta):
+    """Endpoint que responde 404 sempre não pode consumir um terço do backfill."""
+    sync._FALHAS_DE_PAGAMENTO.clear()
+    assert sync.desistir_de_pagamentos(conta.id) is False
+
+    for _ in range(sync.LIMITE_DE_FALHAS_DE_PAGAMENTO):
+        sync._contar_falha_de_pagamento(conta)
+    assert sync.desistir_de_pagamentos(conta.id) is True
+
+    # Um sucesso reabilita: conectar o Mercado Pago depois volta a enriquecer
+    # os pedidos sozinho, sem ninguém precisar intervir.
+    sync._FALHAS_DE_PAGAMENTO.pop(conta.id, None)
+    assert sync.desistir_de_pagamentos(conta.id) is False
