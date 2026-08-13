@@ -242,6 +242,7 @@ class ConectorMock:
             money_release_status="released" if liberado else "pending",
         )
 
+        id_envio = str(rnd.randint(10**10, 10**11))
         return CanonicalOrder(
             external_id=externo,
             channel=self.channel,
@@ -270,11 +271,20 @@ class ConectorMock:
             ship_state=estado,
             ship_city=rnd.choice(CIDADES[estado]),
             logistic_type=logistica,
-            external_shipment_id=str(rnd.randint(10**10, 10**11)),
+            external_shipment_id=id_envio,
             # A Shopee não expõe identificador de pagamento no pedido: o valor
             # vem do escrow, consultado pelo próprio número do pedido.
             external_payment_ids=[] if eh_shopee else [id_pagamento],
-            raw={"mock": True},
+            # O payload bruto reproduz a estrutura real de cada canal — não é
+            # detalhe cosmético: quem lê o bruto depois, como o enriquecimento
+            # posterior do frete, quebra em produção se o simulado guardar um
+            # formato que não existe. Um mock que só finge o resultado, e não a
+            # forma, deixa passar exatamente esse tipo de defeito.
+            raw=(
+                {"package_number": id_envio}
+                if eh_shopee
+                else {"shipping": {"id": int(id_envio)}}
+            ),
         )
 
     async def fetch_order(self, token: str, external_id: str, **_: Any) -> CanonicalOrder | None:

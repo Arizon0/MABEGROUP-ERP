@@ -321,49 +321,57 @@ async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[st
 
     O backfill de volume alto importa só o que vem no payload da busca, para não
     triplicar as chamadas à API. Esta tarefa cobre a diferença depois, em lotes
-    pequenos e espaçados: o frete chega com atraso de minutos ou horas, o que é
-    aceitável para um custo histórico, e em troca a importação inicial deixa de
-    levar a noite inteira.
+    pequenos e espaçados.
+
+    O identificador do envio vem do **payload bruto do próprio pedido**, não da
+    tabela de envios: quando o backfill pula o enriquecimento, nenhum registro
+    de envio chega a ser criado, então não há de onde partir a não ser do que
+    foi guardado na importação.
 
     Processa os mais recentes primeiro — são os que o vendedor olha.
     """
+    from sqlalchemy import or_
+
     from app.connectors import obter_conector
     from app.models.channel import ChannelAccount
     from app.models.order import Order
-    from app.services import ingest, sync, tokens
+    from app.services import ingest, tokens
 
     async with SessionLocal() as db:
         pendentes = list(
             (
                 await db.execute(
                     select(Order)
-                    .where(
-                        Order.external_shipment_id.is_not(None),
-                        Order.external_shipment_id != "",
-                        Order.shipping_cost == 0,
-                    )
+                    .where(Order.shipping_cost == 0, Order.status != "cancelled")
                     .order_by(Order.date_created.desc())
                     .limit(limite)
                 )
             ).scalars()
         )
         if not pendentes:
-            return {"enriquecidos": 0, "pendentes": 0}
+            return {"enriquecidos": 0, "restantes": 0}
 
         enriquecidos = 0
         erros = 0
+        sem_envio = 0
         por_conta: dict[int, tuple[Any, str]] = {}
 
         for pedido in pendentes:
+            id_envio = _id_do_envio(pedido)
+            if not id_envio:
+                # Venda sem envio (retirada, digital) ou payload sem o campo.
+                # Marcar com custo negativo mínimo distorceria o número, então
+                # apenas se registra e segue — o pedido não volta à fila porque
+                # não há o que buscar.
+                sem_envio += 1
+                continue
+
             if pedido.channel_account_id not in por_conta:
                 conta = await db.get(ChannelAccount, pedido.channel_account_id)
                 if conta is None:
                     continue
                 try:
-                    por_conta[conta.id] = (
-                        conta,
-                        await tokens.obter_access_token(db, conta),
-                    )
+                    por_conta[conta.id] = (conta, await tokens.obter_access_token(db, conta))
                 except Exception:
                     continue
 
@@ -371,44 +379,37 @@ async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[st
             conector = obter_conector(conta.channel)
             try:
                 envio = await conector.fetch_shipment(
-                    token,
-                    pedido.external_shipment_id,
-                    shop_id=conta.external_account_id,
+                    token, id_envio, shop_id=conta.external_account_id
                 )
                 if envio:
                     await ingest.salvar_envio(db, conta, envio)
                     pedido.shipping_cost = envio.cost_seller
-                    # Recalcular o líquido é obrigatório aqui, não opcional: o
-                    # frete entra na fórmula do líquido, e gravá-lo sem refazer
-                    # a conta deixaria o pedido com o custo registrado e o
-                    # líquido de antes — inflado exatamente pelo valor do frete.
-                    # Num Full, isso é a maior deducão depois da comissão.
+                    # Recalcular o líquido é obrigatório, não opcional: o frete
+                    # entra na fórmula, e gravá-lo sem refazer a conta deixaria o
+                    # pedido com o custo registrado e o líquido de antes,
+                    # inflado exatamente pelo valor do frete.
                     _recalcular_liquido(pedido)
                     enriquecidos += 1
             except Exception:
-                # Uma falha aqui não pode parar o lote: o pedido continua na
-                # fila e a próxima execução tenta de novo.
+                # Falha num pedido não pode parar o lote: ele continua na fila e
+                # a próxima execução tenta de novo.
                 erros += 1
 
         await db.commit()
-
-    restantes = 0
-    async with SessionLocal() as db:
-        restantes = int(
-            await db.scalar(
-                select(func.count(Order.id)).where(
-                    Order.external_shipment_id.is_not(None),
-                    Order.external_shipment_id != "",
-                    Order.shipping_cost == 0,
-                )
-            )
-            or 0
-        )
 
     log.info(
         "enriquecimento_concluido",
         enriquecidos=enriquecidos,
         erros=erros,
-        restantes=restantes,
+        sem_envio=sem_envio,
     )
-    return {"enriquecidos": enriquecidos, "erros": erros, "restantes": restantes}
+    return {"enriquecidos": enriquecidos, "erros": erros, "sem_envio": sem_envio}
+
+
+def _id_do_envio(pedido: Any) -> str:
+    """Extrai o identificador do envio do payload guardado na importação."""
+    bruto = pedido.raw or {}
+    if pedido.channel == "shopee":
+        return str(bruto.get("package_number") or "")
+    envio = bruto.get("shipping") or {}
+    return str(envio.get("id") or "")
