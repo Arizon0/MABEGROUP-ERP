@@ -35,6 +35,10 @@ LOTE_MULTIGET = 20
 #: por janelas de data com ordenação ascendente é a única forma de garantir que
 #: nada é perdido em silêncio.
 JANELA_DIAS = 30
+#: Offset máximo que a busca de pedidos do Mercado Livre aceita. Passar disso
+#: não devolve erro — devolve menos pedidos, que é o modo mais perigoso de
+#: falhar, porque o número menor parece legítimo.
+TETO_DE_OFFSET = 1000
 
 
 class ConectorMercadoLivre:
@@ -147,37 +151,78 @@ class ConectorMercadoLivre:
     ) -> list[CanonicalOrder]:
         """Busca pedidos por janelas de data, contornando o limite de offset.
 
-        Percorre o intervalo em fatias de :data:`JANELA_DIAS`, cada uma paginada
-        até o teto seguro de offset. Um laço ingênuo de offset pararia em 1.000
-        pedidos sem erro nenhum — e a ausência dos demais passaria despercebida.
+        O Mercado Livre não pagina além do offset 1.000, e a busca **não avisa**
+        quando há mais: devolve as primeiras mil e o `paging.total` real. Fatiar
+        o período por data contorna isso, mas só se cada fatia couber no teto —
+        com fatia de tamanho fixo, um vendedor de volume alto perde
+        silenciosamente tudo que passa de mil por fatia, que é o pior modo de
+        falhar: número menor, sem erro nenhum.
+
+        Aqui a fatia se **adapta ao volume**: quando o total da janela passa do
+        teto, ela é dividida ao meio e cada metade é tentada de novo, até caber.
+        Uma janela de um único dia com mais de mil pedidos é o limite do que a
+        API permite — nesse caso o que falta é registrado como aviso, em vez de
+        sumir calado.
         """
         api = self._api(chave_limite=f"ml:{seller_id}")
         pedidos: list[CanonicalOrder] = []
+        # Pilha de janelas a processar; começa com fatias do tamanho padrão.
+        pendentes: list[tuple[datetime, datetime]] = []
         inicio = since
-
         while inicio < until:
             fim = min(inicio + timedelta(days=JANELA_DIAS), until)
+            pendentes.append((inicio, fim))
+            inicio = fim
+        pendentes.reverse()
+
+        while pendentes:
+            janela_inicio, janela_fim = pendentes.pop()
             offset = 0
+            total = 0
+            colhidos = 0
+
             while True:
                 resposta = await api.get(
                     "/orders/search",
                     token=token,
                     params={
                         "seller": seller_id,
-                        "order.date_created.from": _iso(inicio),
-                        "order.date_created.to": _iso(fim),
+                        "order.date_created.from": _iso(janela_inicio),
+                        "order.date_created.to": _iso(janela_fim),
                         "sort": "date_asc",
                         "offset": offset,
                         "limit": 50,
                     },
                 )
                 resultados = (resposta or {}).get("results") or []
-                pedidos.extend(norm.normalizar_pedido(p) for p in resultados)
                 total = int(((resposta or {}).get("paging") or {}).get("total") or 0)
-                offset += 50
-                if offset >= min(total, 1000) or not resultados:
+
+                # A janela não cabe no teto: descarta o que veio e reprocessa em
+                # duas metades. Descartar é intencional — aproveitar as mil
+                # primeiras e completar com as metades duplicaria pedidos.
+                if total > TETO_DE_OFFSET and (janela_fim - janela_inicio) > timedelta(days=1):
+                    meio = janela_inicio + (janela_fim - janela_inicio) / 2
+                    pendentes.extend([(meio, janela_fim), (janela_inicio, meio)])
+                    colhidos = -1
                     break
-            inicio = fim
+
+                pedidos.extend(norm.normalizar_pedido(p) for p in resultados)
+                colhidos += len(resultados)
+                offset += 50
+                if offset >= min(total, TETO_DE_OFFSET) or not resultados:
+                    break
+
+            if colhidos >= 0 and total > TETO_DE_OFFSET:
+                # Só chega aqui com janela de um dia: o teto da API é menor que o
+                # volume do dia e não há como fatiar mais.
+                log.warning(
+                    "pedidos_acima_do_teto_de_paginacao",
+                    seller=seller_id,
+                    dia=janela_inicio.date().isoformat(),
+                    total_informado=total,
+                    importados=colhidos,
+                    faltando=total - colhidos,
+                )
 
         return pedidos
 
