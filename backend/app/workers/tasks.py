@@ -7,6 +7,7 @@ todos os tenants lento durante o onboarding de um único cliente.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import structlog
@@ -287,6 +288,34 @@ async def semear_demonstracao(_ctx: dict[str, Any], tenant_id: int = 1) -> dict[
         return {"contas": len(contas)}
 
 
+def _recalcular_liquido(pedido: Any) -> None:
+    """Refaz o líquido a partir das parcelas já conhecidas do pedido.
+
+    Só recalcula quando o líquido foi **calculado** pelo sistema. Se o canal
+    informou o valor ou ele veio de um repasse liquidado, o número dele vale
+    mais que qualquer conta nossa — sobrescrevê-lo faria o painel divergir do
+    extrato que o vendedor confere.
+    """
+    from app.models.enums import FonteLiquido, StatusPedido
+    from app.services.finance import arredondar
+
+    if pedido.net_source not in (FonteLiquido.CALCULADO, None, ""):
+        return
+    if pedido.status == StatusPedido.CANCELADO:
+        return
+
+    pedido.net_amount = arredondar(
+        Decimal(str(pedido.gross_amount or 0))
+        + Decimal(str(pedido.shipping_revenue or 0))
+        - Decimal(str(pedido.platform_fee or 0))
+        - Decimal(str(pedido.payment_fee or 0))
+        - Decimal(str(pedido.shipping_cost or 0))
+        - Decimal(str(pedido.tax_amount or 0))
+        + Decimal(str(pedido.discount_amount or 0))
+        - Decimal(str(pedido.refund_amount or 0))
+    )
+
+
 async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[str, Any]:
     """Preenche o custo de frete dos pedidos importados sem enriquecimento.
 
@@ -349,6 +378,12 @@ async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[st
                 if envio:
                     await ingest.salvar_envio(db, conta, envio)
                     pedido.shipping_cost = envio.cost_seller
+                    # Recalcular o líquido é obrigatório aqui, não opcional: o
+                    # frete entra na fórmula do líquido, e gravá-lo sem refazer
+                    # a conta deixaria o pedido com o custo registrado e o
+                    # líquido de antes — inflado exatamente pelo valor do frete.
+                    # Num Full, isso é a maior deducão depois da comissão.
+                    _recalcular_liquido(pedido)
                     enriquecidos += 1
             except Exception:
                 # Uma falha aqui não pode parar o lote: o pedido continua na
