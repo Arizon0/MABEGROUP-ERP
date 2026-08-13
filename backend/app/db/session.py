@@ -18,7 +18,14 @@ def _kwargs_engine() -> dict:
         # Postgres gerenciado derruba conexões ociosas; sem pre_ping a primeira
         # query após um período parado falha com "server closed the connection".
         "pool_pre_ping": True,
-        "pool_recycle": 1800,
+        # Cinco minutos, não trinta. Uma sincronização longa alterna trabalho no
+        # banco com esperas de HTTP que chegam a minutos — a espera imposta pelo
+        # `Retry-After` do canal, sobretudo. Nesse intervalo a conexão ociosa
+        # morre, e a próxima operação a encontra morta. O `pre_ping` deveria
+        # cobrir isso, mas no driver assíncrono a falha no teste de vida estoura
+        # como MissingGreenlet e derruba a requisição inteira, em vez de trocar a
+        # conexão em silêncio. Reciclar antes evita chegar nesse caminho.
+        "pool_recycle": settings.DB_POOL_RECYCLE,
     }
 
 

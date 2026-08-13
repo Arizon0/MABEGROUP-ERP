@@ -217,7 +217,7 @@ async def sincronizar_pedidos(
             account_id=conta.id,
         )
     except Exception as exc:
-        await db.rollback()
+        await _desfazer(db)
         await _registrar_falha(db, conta, Recurso.PEDIDOS, exc)
         resultado.erros.append(str(exc)[:400])
 
@@ -265,6 +265,21 @@ def _contar_falha_de_pagamento(conta: ChannelAccount) -> None:
                 "não está conectado. Os totais do pedido não dependem disso."
             ),
         )
+
+
+async def _desfazer(db: AsyncSession) -> None:
+    """Desfaz a transação sem deixar uma segunda falha mascarar a primeira.
+
+    Quando a causa do erro é a própria conexão ter morrido — o caso mais comum
+    numa sincronização longa, que alterna banco e esperas de HTTP —, o
+    ``rollback`` também falha. Sem esta proteção, a exceção do rollback
+    substitui a original no rastreamento, e o log passa a apontar para o
+    encerramento da transação em vez de para o que de fato quebrou.
+    """
+    try:
+        await db.rollback()
+    except Exception as exc:  # pragma: no cover - depende de conexão morta
+        log.warning("rollback_falhou", erro=str(exc)[:200])
 
 
 async def _coletar_complementos(
@@ -355,7 +370,7 @@ async def sincronizar_anuncios(db: AsyncSession, conta: ChannelAccount) -> Resul
         cursor.consecutive_failures = 0
         await db.commit()
     except Exception as exc:
-        await db.rollback()
+        await _desfazer(db)
         await _registrar_falha(db, conta, Recurso.ANUNCIOS, exc)
         resultado.erros.append(str(exc)[:400])
 
@@ -382,7 +397,7 @@ async def sincronizar_perguntas(db: AsyncSession, conta: ChannelAccount) -> Resu
         cursor.last_synced_at = datetime.now(UTC)
         await db.commit()
     except Exception as exc:
-        await db.rollback()
+        await _desfazer(db)
         await _registrar_falha(db, conta, Recurso.PERGUNTAS, exc)
         resultado.erros.append(str(exc)[:400])
     resultado.duracao_s = time.monotonic() - inicio
@@ -415,7 +430,7 @@ async def sincronizar_reclamacoes(db: AsyncSession, conta: ChannelAccount) -> Re
         cursor.consecutive_failures = 0
         await db.commit()
     except Exception as exc:
-        await db.rollback()
+        await _desfazer(db)
         await _registrar_falha(db, conta, Recurso.RECLAMACOES, exc)
         resultado.erros.append(str(exc)[:400])
     resultado.duracao_s = time.monotonic() - inicio
@@ -449,7 +464,7 @@ async def sincronizar_campanhas(db: AsyncSession, conta: ChannelAccount) -> Resu
         cursor.consecutive_failures = 0
         await db.commit()
     except Exception as exc:
-        await db.rollback()
+        await _desfazer(db)
         await _registrar_falha(db, conta, Recurso.CAMPANHAS, exc)
         resultado.erros.append(str(exc)[:400])
     resultado.duracao_s = time.monotonic() - inicio
@@ -516,7 +531,7 @@ async def capturar_reputacao(db: AsyncSession, conta: ChannelAccount) -> None:
             )
         await db.commit()
     except Exception as exc:
-        await db.rollback()
+        await _desfazer(db)
         log.debug("captura_reputacao_falhou", conta=conta.id, erro=str(exc))
 
 

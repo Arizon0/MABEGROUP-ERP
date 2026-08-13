@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./marketplace_hub.db"
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
+    #: Segundos após os quais uma conexão do pool é descartada em vez de
+    #: reutilizada. Curto de propósito: ver o comentário em ``db/session.py``.
+    DB_POOL_RECYCLE: int = 300
     DB_ECHO: bool = False
 
     # --- Redis (fila, cache e pub/sub do painel ao vivo) ----------------------
