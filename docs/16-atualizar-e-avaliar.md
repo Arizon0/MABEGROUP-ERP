@@ -59,6 +59,30 @@ e deixe a carga inicial recriar. As faixas do Anexo I vêm preenchidas.
 
 ---
 
+## 16.2b Sincronizar uma conta
+
+```bash
+./scripts/sincronizar.sh          # conta 1, completa
+./scripts/sincronizar.sh 2        # outra conta
+./scripts/sincronizar.sh 1 rapida # só pedidos
+```
+
+O script faz login, dispara a sincronização em segundo plano e diz onde ficou a
+saída. Ele existe porque a alternativa manual falha de três formas silenciosas:
+o token expira em 30 minutos, a variável de ambiente só vale na aba onde foi
+criada, e fechar o terminal cancela um backfill que leva dezenas de minutos. Nos
+três casos a requisição sai sem autenticação e volta apenas "não autorizado",
+sem dizer qual dos três aconteceu.
+
+Acompanhe o avanço:
+
+```bash
+docker compose exec db psql -U marketplace -d marketplace_hub \
+  -c "select count(*) from orders;"
+```
+
+---
+
 ## 16.3 Roteiro de avaliação
 
 A ordem importa: cada passo alimenta o seguinte.
