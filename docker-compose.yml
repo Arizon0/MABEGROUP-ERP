@@ -93,6 +93,28 @@ services:
     command: arq app.workers.settings.WorkerSettings
     environment: *ambiente
     volumes: ['./backend:/app']
+    # O healthcheck da imagem consulta http://localhost:8000/health, que existe
+    # na API. O worker roda `arq` e não sobe servidor HTTP nenhum, então
+    # herdá-lo faria o contêiner aparecer como "unhealthy" para sempre — um
+    # alarme falso que manda procurar defeito onde não há. Aqui a verificação é
+    # a que corresponde ao processo que de fato roda neste contêiner.
+    healthcheck:
+      # Verifica o que de fato pode falhar sem derrubar o contêiner: o worker
+      # vivo mas sem alcançar o Redis, situação em que ele para de consumir a
+      # fila em silêncio. Usa só o que já está instalado — `pgrep` exigiria o
+      # pacote procps, que não está na imagem.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import asyncio, os
+          from redis.asyncio import from_url
+          asyncio.run(from_url(os.environ["REDIS_URL"]).ping())
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     depends_on:
       api: {condition: service_started}
 
