@@ -330,11 +330,9 @@ async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[st
 
     Processa os mais recentes primeiro — são os que o vendedor olha.
     """
-    from sqlalchemy import or_
-
     from app.connectors import obter_conector
     from app.models.channel import ChannelAccount
-    from app.models.order import Order
+    from app.models.order import Order, Shipment
     from app.services import ingest, tokens
 
     async with SessionLocal() as db:
@@ -342,7 +340,17 @@ async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[st
             (
                 await db.execute(
                     select(Order)
-                    .where(Order.shipping_cost == 0, Order.status != "cancelled")
+                    .where(
+                        Order.status != "cancelled",
+                        # A fila é "pedido sem registro de envio", não "pedido
+                        # com frete zero". Frete zero é resultado legítimo —
+                        # frete grátis existe —, e usá-lo como critério faz o
+                        # pedido voltar à fila depois de enriquecido, num laço
+                        # que nunca termina.
+                        ~select(Shipment.id)
+                        .where(Shipment.order_id == Order.id)
+                        .exists(),
+                    )
                     .order_by(Order.date_created.desc())
                     .limit(limite)
                 )
@@ -382,7 +390,13 @@ async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[st
                     token, id_envio, shop_id=conta.external_account_id
                 )
                 if envio:
-                    await ingest.salvar_envio(db, conta, envio)
+                    registro = await ingest.salvar_envio(db, conta, envio)
+                    # Vínculo explícito: o enriquecimento parte do pedido, então
+                    # a relação é conhecida aqui. Deixá-la a cargo do
+                    # `external_order_id` devolvido pelo canal faz o envio ficar
+                    # órfão quando o canal não repete esse campo na consulta de
+                    # envio — e sem o vínculo o pedido nunca sai da fila.
+                    registro.order_id = pedido.id
                     pedido.shipping_cost = envio.cost_seller
                     # Recalcular o líquido é obrigatório, não opcional: o frete
                     # entra na fórmula, e gravá-lo sem refazer a conta deixaria o

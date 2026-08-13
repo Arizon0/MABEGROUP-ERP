@@ -164,3 +164,36 @@ async def test_tarefa_roda_e_reduz_o_liquido(db, conta):
     )
     # O frete é dedução: o líquido tem de cair, nunca subir.
     assert depois < antes, f"líquido não caiu: {antes} → {depois}"
+
+
+async def test_pedido_com_frete_zero_sai_da_fila(db, conta):
+    """Frete grátis não pode reprocessar o mesmo pedido para sempre.
+
+    A primeira versão usava ``shipping_cost = 0`` como critério de pendência.
+    Frete zero é resultado legítimo, então o pedido voltava à fila depois de
+    enriquecido e o comando de completar rodava em laço infinito — observado em
+    produção, 173 rodadas sobre os mesmos dois pedidos.
+    """
+    from app.models.order import Shipment
+    from app.services import sync
+    from app.workers import tasks
+
+    await sync.sincronizar_pedidos(db, conta, enriquecer=False)
+
+    primeira = await tasks.enriquecer_pedidos({}, limite=500)
+    assert primeira["enriquecidos"] > 0
+
+    # Zera o custo de todos, simulando frete grátis em toda a base. Se o
+    # critério fosse o valor, tudo voltaria à fila.
+    for pedido in (await db.execute(select(Order))).scalars():
+        pedido.shipping_cost = Decimal("0")
+    await db.commit()
+
+    segunda = await tasks.enriquecer_pedidos({}, limite=500)
+    assert segunda["enriquecidos"] == 0, (
+        "a fila deveria estar vazia: o critério é ter registro de envio, "
+        "não o valor do frete"
+    )
+
+    envios = await db.scalar(select(func.count(Shipment.id)))
+    assert envios > 0, "os envios precisam ter sido gravados"

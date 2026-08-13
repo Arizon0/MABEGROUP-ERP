@@ -5,6 +5,32 @@ sentido, em vez de clicar aba por aba sem saber o que procurar.
 
 ---
 
+## 16.0 Depois de reiniciar o Mac
+
+```bash
+cd ~/Documents/MABEGROUP-ERP     # ajuste se o clone estiver em outro lugar
+./scripts/iniciar.sh
+```
+
+O script confere se o Docker está de pé, busca atualizações, sobe os
+contêineres, espera a API responder e informa quantos pedidos há no banco.
+
+**Os dados sobrevivem ao reinício.** O banco fica num volume do Docker, não
+dentro do contêiner — desligar a máquina não apaga nada.
+
+### O túnel é opcional no dia a dia
+
+O `cloudflared` serve para o marketplace **enviar avisos instantâneos** de venda
+nova. Sem ele o sistema continua funcionando: a sincronização periódica roda a
+cada cinco minutos e cobre tudo que o aviso traria.
+
+Reabrir o túnel só compensa quando você quiser o painel ao vivo reagindo em
+segundos — e aí há um custo: a URL gratuita **muda a cada reinício**, então é
+preciso atualizar o `.env` e recadastrá-la nos portais. Para uso contínuo, vale
+um túnel nomeado da Cloudflare com endereço fixo.
+
+---
+
 ## 16.1 Atualizar (5 minutos)
 
 Abra o Terminal na pasta do projeto:
