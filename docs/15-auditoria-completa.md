@@ -12,12 +12,13 @@ nada.
 
 | Dimensão | Situação |
 |---|---|
-| Testes automatizados | **219 passando**, 13 pulados (métodos que um canal genuinamente não implementa) |
-| Endpoints REST | 87 — sendo 33 de escrita |
-| Tabelas | 42, sem divergência entre modelos e migrations |
+| Testes automatizados | **235 passando**, 13 pulados (métodos que um canal genuinamente não implementa) |
+| Endpoints REST | 87 — sendo 32 de escrita |
+| Tabelas | 43, sem divergência entre modelos e migrations |
 | Abas do painel | 11 |
 | Build do frontend | Limpo (`tsc --noEmit` + `vite build`), 17 testes passando |
-| Defeitos encontrados nesta auditoria | 11 — todos corrigidos |
+| Defeitos encontrados nesta auditoria | 18 — todos corrigidos |
+| Validação contra dados reais | Bruto 0,6% · Líquido 1,0% de diferença ante o relatório do Mercado Livre |
 
 Os 13 testes pulados não são cobertura faltante: o contrato de conectores
 percorre todos os métodos de todos os canais e pula o que não existe naquele
@@ -165,6 +166,27 @@ contêiner de rolagem da tabela — e não página a página. Ver docs/17.
 só `unit_cost`, enquanto a ingestão usava custo mais embalagem. O mesmo pedido
 saía com CMV diferente conforme tivesse sido mapeado antes ou depois da
 importação. Corrigido para usar o mesmo custo nos dois caminhos.
+
+### 12–18. Os sete defeitos que só a operação real revelou
+
+Encontrados ao importar 4.795 pedidos reais do Mercado Livre. Nenhum deles seria
+pego pela suíte: quatro exigem volume, um exige Postgres, um exige comparação
+com a fonte, e o último é o que deixou os outros passarem.
+
+| # | Defeito | Como apareceu |
+|---|---|---|
+| 12 | Paginação truncava metade das vendas | O teto de offset de 1.000 do ML é por janela de data; com fatia fixa de 30 dias, o excedente sumia sem erro. 2.370 importados de 4.741 |
+| 13 | Três chamadas por pedido no backfill | ~14 mil requisições para 4.741 pedidos; o canal passa a responder 429 com espera longa e a importação avança 6 pedidos em 6 horas |
+| 14 | Conexão morria em operação longa | O pool reutilizava conexão por 30 min; entre esperas de HTTP ela morre, e no driver assíncrono a falha do teste de vida derruba a requisição inteira |
+| 15 | O rollback escondia a causa | Com a conexão morta o próprio rollback falha, e a exceção dele substituía a original no rastreamento |
+| 16 | Líquido 28% inflado | Consequência de (13): sem o frete, que é dedução, o líquido sobe exatamente o valor do frete. R$ 298 mil contra R$ 233 mil reais |
+| 17 | Tarefa de enriquecimento quebrada | Consultava um campo inexistente no modelo e falhava em toda execução. Nenhum teste a executava |
+| 18 | Simulador fingia o resultado, não a forma | Gravava `{"mock": true}` como payload bruto. Quem lê o bruto depois quebra em produção — foi o que permitiu (17) passar |
+
+**A lição registrada:** um simulador que reproduz o resultado mas não a estrutura
+do dado real cria uma cobertura que parece completa e não é. Os defeitos 12 a 17
+existiram porque nenhum deles tinha como aparecer contra dados simulados no
+formato errado, em volume baixo, sobre SQLite.
 
 ---
 
@@ -353,7 +375,7 @@ Nenhuma delas é contornável por código — todas dependem de terceiros:
 ## 15.8 Como reproduzir esta auditoria
 
 ```bash
-# Backend — 177 testes
+# Backend — 235 testes
 cd backend && .venv/bin/python -m pytest tests/ -v
 
 # Só a cadeia financeira de ponta a ponta
