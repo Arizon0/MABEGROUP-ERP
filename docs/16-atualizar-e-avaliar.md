@@ -83,6 +83,32 @@ docker compose exec db psql -U marketplace -d marketplace_hub \
 
 ---
 
+## 16.2c Completar o frete depois de um backfill
+
+O backfill de volume alto importa sem buscar o frete de cada pedido, para não
+triplicar as chamadas à API. Enquanto o frete não chega, **o líquido do painel
+fica inflado** — o frete é dedução na fórmula.
+
+O worker completa sozinho, em lotes a cada três minutos. Logo depois de um
+backfill isso leva horas, e o painel exibe margem maior que a real nesse
+intervalo. Para resolver de uma vez:
+
+```bash
+docker compose exec api python -m app.workers.completar
+```
+
+Roda a mesma tarefa em sequência até a fila zerar, imprimindo o progresso. Ao
+terminar, confira a convergência contra o relatório do canal:
+
+```bash
+docker compose exec db psql -U marketplace -d marketplace_hub \
+  -c "select count(*) filter (where shipping_cost=0) sem_frete,
+             round(sum(net_amount),0) liquido
+      from orders where status <> 'cancelled';"
+```
+
+---
+
 ## 16.3 Roteiro de avaliação
 
 A ordem importa: cada passo alimenta o seguinte.
