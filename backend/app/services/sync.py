@@ -92,9 +92,30 @@ def _janela(cursor: SyncCursor) -> tuple[datetime, datetime]:
 #: numa falha. Cinquenta mantém a perda máxima em segundos de trabalho.
 TAMANHO_DO_LOTE = 50
 
+#: Acima disto a sincronização é tratada como backfill: importa o essencial e
+#: deixa o enriquecimento por pedido para o worker. Duzentos pedidos com três
+#: chamadas cada já são seiscentas requisições — o teto do que faz sentido pagar
+#: dentro de uma única execução.
+LIMIAR_DE_BACKFILL = 200
 
-async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> ResultadoSync:
-    """Sincroniza pedidos alterados desde a última marca d'água."""
+
+async def sincronizar_pedidos(
+    db: AsyncSession, conta: ChannelAccount, *, enriquecer: bool | None = None
+) -> ResultadoSync:
+    """Sincroniza pedidos alterados desde a última marca d'água.
+
+    ``enriquecer`` controla a busca de frete e pagamento **por pedido**. Cada
+    pedido custa de duas a três chamadas extras à API, e num backfill de
+    milhares de pedidos isso multiplica o volume por três — o suficiente para
+    esbarrar no limite de requisições do canal e transformar uma importação de
+    minutos em horas de espera com ``Retry-After``.
+
+    O padrão (``None``) decide pelo tamanho: acima de :data:`LIMIAR_DE_BACKFILL`
+    pedidos, importa só o essencial — que já vem no próprio payload da busca:
+    totais, itens, comprador, status. O custo de frete fica pendente e é
+    preenchido depois, aos poucos, pelo worker. Assim o vendedor vê o
+    faturamento no mesmo dia em vez de esperar a noite inteira.
+    """
     import time
 
     inicio_exec = time.monotonic()
@@ -113,6 +134,22 @@ async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> Result
             shop_id=conta.external_account_id,
         )
 
+        # Decide pelo volume: um backfill grande não pode pagar três chamadas
+        # por pedido, uma sincronização incremental de dez pedidos pode.
+        enriquecer_agora = (
+            enriquecer if enriquecer is not None else len(pedidos) <= LIMIAR_DE_BACKFILL
+        )
+        if not enriquecer_agora and pedidos:
+            log.info(
+                "backfill_sem_enriquecimento",
+                conta=conta.id,
+                pedidos=len(pedidos),
+                motivo=(
+                    "volume alto: frete e pagamento serão preenchidos depois pelo "
+                    "worker, para não multiplicar por três as chamadas à API"
+                ),
+            )
+
         maior_atualizacao = cursor.last_synced_at
         # Gravar em lotes, e não só no fim: um backfill de 90 dias percorre
         # centenas de pedidos, e um único commit ao final significa que uma
@@ -121,7 +158,12 @@ async def sincronizar_pedidos(db: AsyncSession, conta: ChannelAccount) -> Result
         # fica, o painel mostra progresso enquanto roda, e a reexecução retoma
         # de onde parou em vez de começar do zero.
         for indice, canonico in enumerate(pedidos, start=1):
-            envio, pagamentos = await _coletar_complementos(conta, conector, token, canonico)
+            envio: Any | None = None
+            pagamentos: list[Any] = []
+            if enriquecer_agora:
+                envio, pagamentos = await _coletar_complementos(
+                    conta, conector, token, canonico
+                )
 
             # O pedido precisa existir ANTES de envio e pagamento: os dois se
             # vinculam a ele pela chave externa, e gravá-los primeiro deixaria

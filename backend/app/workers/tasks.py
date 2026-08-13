@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.db.session import SessionLocal
 from app.models.channel import ChannelAccount, WebhookEvent
@@ -285,3 +285,95 @@ async def semear_demonstracao(_ctx: dict[str, Any], tenant_id: int = 1) -> dict[
         await analytics.recalcular_rollups(db, tenant_id, horas=24 * 90)
         await reconciliation.conciliar_periodo(db, tenant_id, dias=90)
         return {"contas": len(contas)}
+
+
+async def enriquecer_pedidos(_ctx: dict[str, Any], limite: int = 150) -> dict[str, Any]:
+    """Preenche o custo de frete dos pedidos importados sem enriquecimento.
+
+    O backfill de volume alto importa só o que vem no payload da busca, para não
+    triplicar as chamadas à API. Esta tarefa cobre a diferença depois, em lotes
+    pequenos e espaçados: o frete chega com atraso de minutos ou horas, o que é
+    aceitável para um custo histórico, e em troca a importação inicial deixa de
+    levar a noite inteira.
+
+    Processa os mais recentes primeiro — são os que o vendedor olha.
+    """
+    from app.connectors import obter_conector
+    from app.models.channel import ChannelAccount
+    from app.models.order import Order
+    from app.services import ingest, sync, tokens
+
+    async with SessionLocal() as db:
+        pendentes = list(
+            (
+                await db.execute(
+                    select(Order)
+                    .where(
+                        Order.external_shipment_id.is_not(None),
+                        Order.external_shipment_id != "",
+                        Order.shipping_cost == 0,
+                    )
+                    .order_by(Order.date_created.desc())
+                    .limit(limite)
+                )
+            ).scalars()
+        )
+        if not pendentes:
+            return {"enriquecidos": 0, "pendentes": 0}
+
+        enriquecidos = 0
+        erros = 0
+        por_conta: dict[int, tuple[Any, str]] = {}
+
+        for pedido in pendentes:
+            if pedido.channel_account_id not in por_conta:
+                conta = await db.get(ChannelAccount, pedido.channel_account_id)
+                if conta is None:
+                    continue
+                try:
+                    por_conta[conta.id] = (
+                        conta,
+                        await tokens.obter_access_token(db, conta),
+                    )
+                except Exception:
+                    continue
+
+            conta, token = por_conta[pedido.channel_account_id]
+            conector = obter_conector(conta.channel)
+            try:
+                envio = await conector.fetch_shipment(
+                    token,
+                    pedido.external_shipment_id,
+                    shop_id=conta.external_account_id,
+                )
+                if envio:
+                    await ingest.salvar_envio(db, conta, envio)
+                    pedido.shipping_cost = envio.cost_seller
+                    enriquecidos += 1
+            except Exception:
+                # Uma falha aqui não pode parar o lote: o pedido continua na
+                # fila e a próxima execução tenta de novo.
+                erros += 1
+
+        await db.commit()
+
+    restantes = 0
+    async with SessionLocal() as db:
+        restantes = int(
+            await db.scalar(
+                select(func.count(Order.id)).where(
+                    Order.external_shipment_id.is_not(None),
+                    Order.external_shipment_id != "",
+                    Order.shipping_cost == 0,
+                )
+            )
+            or 0
+        )
+
+    log.info(
+        "enriquecimento_concluido",
+        enriquecidos=enriquecidos,
+        erros=erros,
+        restantes=restantes,
+    )
+    return {"enriquecidos": enriquecidos, "erros": erros, "restantes": restantes}

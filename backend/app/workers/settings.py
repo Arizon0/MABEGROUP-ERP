@@ -49,12 +49,18 @@ class WorkerSettings:
         tasks.capturar_snapshots,
         tasks.limpar_dados_antigos,
         tasks.verificar_alertas,
+        tasks.enriquecer_pedidos,
     ]
 
     cron_jobs = [
         # Rede de segurança da fila: recupera eventos que não foram enfileirados
         # ou cujo worker morreu no meio do processamento.
         cron(tasks.drenar_webhooks, minute=set(range(0, 60, 2)), run_at_startup=True),
+        # Completa o frete dos pedidos que o backfill importou sem
+        # enriquecimento. A cada três minutos, em lotes pequenos: espaçado o
+        # bastante para não competir com a sincronização pelo limite de
+        # requisições do canal.
+        cron(tasks.enriquecer_pedidos, minute=set(range(0, 60, 3))),
         # Polling incremental — cobre o que o webhook não entregou.
         cron(tasks.sincronizar_pedidos_recentes, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         # Rollups do painel.
