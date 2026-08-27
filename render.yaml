@@ -1,0 +1,63 @@
+# Blueprint do Render — Marketplace Hub a custo zero.
+#
+# Arquitetura enxuta, deliberada:
+#   - UM serviço web (API + painel na mesma origem), plano free.
+#   - Banco: Postgres gerenciado EXTERNO (Supabase), via DATABASE_URL.
+#   - SEM Redis: a aplicação roda em modo degradado documentado (barramento em
+#     memória). O painel "Ao vivo" atualiza a cada sincronização, não a cada
+#     segundo — troca aceitável até o volume justificar fila.
+#   - SEM worker: a sincronização é disparada pelo cron do GitHub Actions
+#     (.github/workflows/sincronizar.yml) chamando POST /accounts/{id}/sync.
+#
+# Para subir de nível depois (tempo real + fila): criar um Key Value e um
+# worker no Render e preencher REDIS_URL — nenhuma mudança de código.
+services:
+  - type: web
+    name: marketplace-hub
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # String do **Session pooler** do Supabase com o driver asyncpg:
+      #   postgresql+asyncpg://postgres.<ref>:<senha>@aws-1-<regiao>.pooler.supabase.com:5432/postgres
+      # O host direto (db.<ref>.supabase.co) só publica IPv6 e falha no Render.
+      # Preenchida no painel (sync: false) — carrega a senha do banco.
+      - key: DATABASE_URL
+        sync: false
+      # Sem Redis de propósito — ver cabeçalho.
+      - key: REDIS_URL
+        value: ""
+      - key: SECRET_KEY
+        generateValue: true
+      # Chave Fernet do cofre de tokens dos marketplaces. NÃO é uma string
+      # qualquer: gere com
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # e cole no painel. generateValue não serve — o formato seria inválido.
+      - key: MASTER_ENCRYPTION_KEY
+        sync: false
+      - key: BUYER_HASH_PEPPER
+        generateValue: true
+      # Conectores reais (as credenciais entram quando você criar os apps nos
+      # DevCenters; até lá a tela de Configurações mostra "não configurado").
+      - key: USE_MOCK_CONNECTORS
+        value: "0"
+      - key: SEED_ON_STARTUP
+        value: "0"
+      # Proprietário criado pelo bootstrap no primeiro boot (idempotente; a
+      # senha nunca é reescrita se o usuário já existir). Troque a senha no
+      # primeiro acesso, em Configurações.
+      - key: ADMIN_EMAIL
+        value: arizono3528@gmail.com
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: TENANT_NAME
+        value: MABE Group
+      - key: TENANT_SLUG
+        value: mabegroup
+      # Painel servido pela mesma origem => CORS pode ficar restrito a ela.
+      - key: CORS_ORIGINS
+        value: https://marketplace-hub.onrender.com

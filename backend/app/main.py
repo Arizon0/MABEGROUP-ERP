@@ -205,3 +205,56 @@ async def raiz() -> dict:
         "documentacao": "/docs",
         "api": settings.API_V1_PREFIX,
     }
+
+
+# --- Painel servido pela própria API (deploy de serviço único) ---------------
+# Em desenvolvimento o Vite roda à parte com proxy; em produção "um serviço só"
+# a API entrega o build do painel. Só monta se o build existir — a API pura
+# (testes, worker, compose com frontend separado) continua idêntica.
+
+
+def _diretorio_do_painel():
+    import os
+    from pathlib import Path
+
+    candidatos = []
+    if os.getenv("STATIC_DIR"):
+        candidatos.append(Path(os.environ["STATIC_DIR"]))
+    aqui = Path(__file__).resolve()
+    candidatos.append(aqui.parents[2] / "frontend" / "dist")  # raiz do repo
+    candidatos.append(Path("/app/frontend/dist"))             # imagem Docker
+    for c in candidatos:
+        if c.is_dir() and (c / "index.html").is_file():
+            return c
+    return None
+
+
+def _montar_painel(app: FastAPI) -> None:
+    dist = _diretorio_do_painel()
+    if dist is None:
+        return
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    assets = dist / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+
+    @app.get("/{caminho:path}", include_in_schema=False)
+    async def spa(caminho: str):
+        # As rotas explícitas (API, docs, health) já foram registradas antes e
+        # vencem esta. Se um /api/* inexistente cair aqui, é 404 — devolver o
+        # index.html para uma chamada de API mascararia o erro real.
+        if caminho.startswith(("api/", "docs", "redoc", "openapi.json", "health", "metrics")):
+            raise HTTPException(status_code=404, detail="Não encontrado")
+        arquivo = dist / caminho
+        if caminho and arquivo.is_file():
+            return FileResponse(str(arquivo))
+        return FileResponse(str(dist / "index.html"))
+
+    log.info("painel_montado", diretorio=str(dist))
+
+
+_montar_painel(app)

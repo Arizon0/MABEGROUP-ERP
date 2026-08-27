@@ -1,0 +1,68 @@
+# O "worker" de custo zero: em vez de um processo residente consumindo um
+# plano pago, o cron do GitHub Actions acorda a cada 30 minutos, autentica na
+# API e dispara a sincronização de cada conta conectada. Os pedidos ficam no
+# máximo meia hora defasados — aceitável para análise; o dia que deixar de
+# ser, a saída é o worker de verdade (arq + Redis), sem mudança de código.
+#
+# Segredos exigidos (Settings → Secrets and variables → Actions):
+#   HUB_URL             ex.: https://marketplace-hub.onrender.com
+#   HUB_ADMIN_EMAIL     o e-mail do proprietário
+#   HUB_ADMIN_PASSWORD  a senha dele
+name: Sincronizar marketplaces
+
+on:
+  schedule:
+    # A cada 30 min. O GitHub não garante o minuto exato (pode atrasar alguns
+    # minutos em horário de pico) — irrelevante para esta finalidade.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}   # botão "Run workflow" para sincronizar na hora
+
+concurrency:
+  # Uma sincronização por vez: se a anterior ainda roda (backfill longo),
+  # empilhar outra só disputaria as mesmas contas.
+  group: sincronizacao
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Autenticar e sincronizar todas as contas
+        env:
+          HUB_URL: ${{ secrets.HUB_URL }}
+          EMAIL: ${{ secrets.HUB_ADMIN_EMAIL }}
+          SENHA: ${{ secrets.HUB_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          fatal() { echo "::error::$1"; exit 1; }
+          [ -n "${HUB_URL:-}" ] || fatal "Defina o segredo HUB_URL"
+
+          # O plano free do Render dorme; a primeira chamada pode demorar ~1 min.
+          for i in $(seq 1 12); do
+            curl -sf -m 60 "$HUB_URL/health" >/dev/null && break
+            echo "aguardando o serviço acordar ($i/12)…"; sleep 10
+          done
+
+          TOKEN=$(curl -sf -m 60 -X POST "$HUB_URL/api/v1/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])') \
+            || fatal "Falha no login — confira HUB_ADMIN_EMAIL/HUB_ADMIN_PASSWORD"
+
+          CONTAS=$(curl -sf -m 60 -H "Authorization: Bearer $TOKEN" \
+            "$HUB_URL/api/v1/accounts" \
+            | python3 -c 'import sys,json;print(" ".join(str(c["id"]) for c in json.load(sys.stdin)))')
+
+          if [ -z "$CONTAS" ]; then
+            echo "Nenhuma conta conectada ainda — nada a sincronizar."
+            exit 0
+          fi
+
+          for ID in $CONTAS; do
+            echo "→ sincronizando conta $ID"
+            curl -sf -m 1200 -X POST \
+              -H "Authorization: Bearer $TOKEN" \
+              "$HUB_URL/api/v1/accounts/$ID/sync?completo=false" \
+              || echo "::warning::conta $ID falhou nesta rodada; a próxima tenta de novo"
+          done

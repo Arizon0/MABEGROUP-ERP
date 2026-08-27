@@ -98,6 +98,9 @@ class Settings(BaseSettings):
 
     # --- Seed inicial --------------------------------------------------------
     SEED_ON_STARTUP: bool = True
+    # Nome/slug da organização criada pelo bootstrap de produção.
+    TENANT_NAME: str = "Minha Operação"
+    TENANT_SLUG: str = "principal"
     ADMIN_EMAIL: str = "admin@marketplacehub.com.br"
     ADMIN_PASSWORD: str = "admin123"
     ADMIN_TENANT: str = "Demonstração"
