@@ -197,14 +197,10 @@ async def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.get("/", tags=["Infraestrutura"], include_in_schema=False)
-async def raiz() -> dict:
-    return {
-        "nome": settings.APP_NAME,
-        "versao": app.version,
-        "documentacao": "/docs",
-        "api": settings.API_V1_PREFIX,
-    }
+# A rota informativa da raiz só existe quando a API roda SEM o painel (worker,
+# testes, compose com frontend separado). Com o painel montado, "/" é a tela
+# de entrada — e como o Starlette resolve rotas na ordem de registro, esta
+# precisa ficar de fora para não sombrear o index.html do SPA.
 
 
 # --- Painel servido pela própria API (deploy de serviço único) ---------------
@@ -232,6 +228,15 @@ def _diretorio_do_painel():
 def _montar_painel(app: FastAPI) -> None:
     dist = _diretorio_do_painel()
     if dist is None:
+        @app.get("/", tags=["Infraestrutura"], include_in_schema=False)
+        async def raiz() -> dict:
+            return {
+                "nome": settings.APP_NAME,
+                "versao": app.version,
+                "documentacao": "/docs",
+                "api": settings.API_V1_PREFIX,
+            }
+
         return
 
     from fastapi import HTTPException
