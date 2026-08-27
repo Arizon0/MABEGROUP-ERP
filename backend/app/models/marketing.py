@@ -76,3 +76,56 @@ class CampaignItem(Base):
     stock_limit: Mapped[int] = mapped_column(Integer, default=0)
 
     campaign: Mapped[Campaign] = relationship(back_populates="items")
+
+
+class EscopoAds:
+    """Escopos de lançamento de investimento em Ads, do mais específico ao mais
+    genérico. A ordem é a precedência do rateio: um pedido coberto por um
+    lançamento de anúncio não recebe verba do SKU nem do canal de novo."""
+
+    ANUNCIO = "listing"
+    SKU = "sku"
+    CANAL = "channel"
+
+    TODOS = (ANUNCIO, SKU, CANAL)
+
+
+class AdSpend(Base, TimestampMixin):
+    """Investimento em publicidade de uma competência, em um escopo.
+
+    Existe porque nenhuma API entrega o custo de Ads **por pedido** — o
+    Mercado Livre consolida por campanha/anúncio e a Ads API da Shopee exige
+    whitelist separada. O valor lançado aqui é rateado entre os pedidos da
+    competência proporcionalmente à receita (ver ``services/margens.py``), que
+    é o mesmo método da planilha de qualquer analista — só que auditável.
+
+    ``attributed_revenue`` é a receita que o canal atribuiu à publicidade, do
+    relatório de Ads. Sem ela não existe ACOS (a tela mostra "—"); TACOS não
+    precisa dela porque usa a receita total do pedido.
+    """
+
+    __tablename__ = "ad_spends"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "channel", "year", "month", "scope", "reference",
+            name="uq_ads_tenant_competencia_escopo",
+        ),
+        Index("ix_ads_tenant_competencia", "tenant_id", "year", "month"),
+    )
+
+    id: Mapped[int] = mapped_column(BigPK, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        BigPK, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    scope: Mapped[str] = mapped_column(String(10), default=EscopoAds.CANAL, nullable=False)
+    #: id externo do anúncio quando ``scope="listing"``; ``sku_base`` quando
+    #: ``scope="sku"``; ``""`` quando o lançamento é do canal inteiro. Vazio e
+    #: não NULL: em Postgres dois NULL não colidem no UNIQUE, o que permitiria
+    #: duplicar o lançamento do canal e dobrar o rateio.
+    reference: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    amount: Mapped[Decimal] = mapped_column(default=Decimal("0"), nullable=False)
+    attributed_revenue: Mapped[Decimal | None] = mapped_column(nullable=True)
+    notes: Mapped[str] = mapped_column(String(300), default="")

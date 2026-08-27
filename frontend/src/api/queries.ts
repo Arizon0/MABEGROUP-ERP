@@ -3,6 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from './client'
 import type {
+  AdSpend,
+  AdSpendIn,
+  AnaliseMargens,
   Anuncio,
   Cascata,
   Conta,
@@ -496,3 +499,58 @@ export const useMediaMovel = (f: Filtros, janela = 7) =>
     queryFn: () => api<MediaMovel>('/reports/moving-average', { params: { ...f, janela } }),
     ...PADRAO,
   })
+
+// --- Margem por pedido --------------------------------------------------------
+
+export const useMargens = (
+  f: Filtros,
+  opts: {
+    recorte?: string
+    ordem?: string
+    busca?: string
+    pagina?: number
+    tamanho?: number
+    incluir_cancelados?: boolean
+  } = {},
+) =>
+  useQuery({
+    queryKey: ['margens', f, opts],
+    queryFn: () =>
+      api<AnaliseMargens>('/orders/margins', { params: { ...f, ...opts } }),
+    ...PADRAO,
+    // Trocar de recorte/página mantém a tabela anterior visível no lugar de
+    // piscar para o esqueleto — a comparação entre recortes é o uso típico.
+    placeholderData: (anterior) => anterior,
+  })
+
+export const useAdSpends = (year?: number, month?: number, channel?: string) =>
+  useQuery({
+    queryKey: ['ad-spend', year, month, channel],
+    queryFn: () =>
+      api<AdSpend[]>('/costs/ad-spend', { params: { year, month, channel } }),
+    ...PADRAO,
+  })
+
+export function useSalvarAdSpend() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (dados: AdSpendIn) =>
+      api<AdSpend>('/costs/ad-spend', { method: 'PUT', body: JSON.stringify(dados) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ad-spend'] })
+      // O rateio muda a margem de todos os pedidos da competência.
+      qc.invalidateQueries({ queryKey: ['margens'] })
+    },
+  })
+}
+
+export function useRemoverAdSpend() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api(`/costs/ad-spend/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ad-spend'] })
+      qc.invalidateQueries({ queryKey: ['margens'] })
+    },
+  })
+}

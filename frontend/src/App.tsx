@@ -8,6 +8,7 @@ import { AoVivo } from '@/pages/AoVivo'
 import { Configuracoes } from '@/pages/Configuracoes'
 import { Custos } from '@/pages/Custos'
 import { Faturamento } from '@/pages/Faturamento'
+import { Margens } from '@/pages/Margens'
 import { Logistica } from '@/pages/Logistica'
 import { Marketing } from '@/pages/Marketing'
 import { Pedidos } from '@/pages/Pedidos'
@@ -20,6 +21,7 @@ const ABAS = [
   { para: '/', rotulo: 'Visão geral', icone: '◈' },
   { para: '/ao-vivo', rotulo: 'Ao vivo', icone: '◉' },
   { para: '/faturamento', rotulo: 'Faturamento', icone: '₿' },
+  { para: '/margens', rotulo: 'Margens', icone: '±' },
   { para: '/pedidos', rotulo: 'Pedidos', icone: '☰' },
   { para: '/produtos', rotulo: 'Produtos', icone: '▤' },
   { para: '/custos', rotulo: 'Custos e lucro', icone: '◑' },
@@ -149,6 +151,7 @@ export default function App() {
         <Route path="/" element={<VisaoGeralPage />} />
         <Route path="/ao-vivo" element={<AoVivo />} />
         <Route path="/faturamento" element={<Faturamento />} />
+        <Route path="/margens" element={<Margens />} />
         <Route path="/pedidos" element={<Pedidos />} />
         <Route path="/produtos" element={<Produtos />} />
         <Route path="/custos" element={<Custos />} />

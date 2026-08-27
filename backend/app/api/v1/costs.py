@@ -607,3 +607,159 @@ async def _obter_despesa(db, tenant_id: int, despesa_id: int) -> OperatingExpens
     if despesa is None:
         raise NaoEncontrado("Despesa não encontrada.")
     return despesa
+
+
+# --- Investimento em publicidade (Ads) ---------------------------------------
+# Alimenta a análise de margem por pedido (GET /orders/margins). Nenhuma API
+# entrega custo de Ads por pedido; o lançamento aqui é por competência e
+# escopo, e o rateio acontece na consulta da análise.
+
+from pydantic import field_validator  # noqa: E402
+
+from app.models.marketing import AdSpend, EscopoAds  # noqa: E402
+
+
+class AdSpendIn(BaseModel):
+    channel: str = Field(min_length=1, max_length=20)
+    year: int = Field(ge=2000, le=2100)
+    month: int = Field(ge=1, le=12)
+    scope: str = Field(default=EscopoAds.CANAL)
+    reference: str = Field(default="", max_length=80)
+    amount: Decimal = Field(ge=0)
+    #: Receita que o canal atribuiu à publicidade (relatório de Ads). Sem ela
+    #: não há ACOS — só TACOS.
+    attributed_revenue: Decimal | None = Field(default=None, ge=0)
+    notes: str = Field(default="", max_length=300)
+
+    @field_validator("scope")
+    @classmethod
+    def _escopo_valido(cls, v: str) -> str:
+        if v not in EscopoAds.TODOS:
+            raise ValueError(f"scope deve ser um de {list(EscopoAds.TODOS)}")
+        return v
+
+    @field_validator("reference")
+    @classmethod
+    def _referencia_limpa(cls, v: str) -> str:
+        return (v or "").strip()
+
+
+class AdSpendOut(Base):
+    id: int
+    channel: str
+    year: int
+    month: int
+    scope: str
+    reference: str
+    amount: Decimal
+    attributed_revenue: Decimal | None = None
+    notes: str
+
+
+@router.get("/ad-spend", response_model=list[AdSpendOut], summary="Investimentos em Ads")
+async def listar_ad_spend(
+    ctx: CtxDep,
+    db: DbDep,
+    year: int | None = Query(None, ge=2000, le=2100),
+    month: int | None = Query(None, ge=1, le=12),
+    channel: str | None = None,
+) -> list[AdSpendOut]:
+    consulta = select(AdSpend).where(AdSpend.tenant_id == ctx.tenant_id)
+    if year is not None:
+        consulta = consulta.where(AdSpend.year == year)
+    if month is not None:
+        consulta = consulta.where(AdSpend.month == month)
+    if channel:
+        consulta = consulta.where(AdSpend.channel == channel)
+    resultado = await db.execute(
+        consulta.order_by(AdSpend.year.desc(), AdSpend.month.desc(), AdSpend.channel)
+    )
+    return [AdSpendOut.model_validate(a) for a in resultado.scalars()]
+
+
+@router.put(
+    "/ad-spend",
+    response_model=AdSpendOut,
+    summary="Lança ou atualiza investimento em Ads",
+    description=(
+        "Idempotente pela chave (canal, ano, mês, escopo, referência): regravar "
+        "a mesma competência atualiza o valor em vez de duplicar o rateio."
+    ),
+)
+async def salvar_ad_spend(dados: AdSpendIn, ctx: AnalistaDep, db: DbDep) -> AdSpendOut:
+    # Escopo de canal não carrega referência; guardar uma criaria dois
+    # lançamentos "do canal inteiro" diferentes na mesma competência.
+    referencia = "" if dados.scope == EscopoAds.CANAL else dados.reference
+    existente = (
+        await db.execute(
+            select(AdSpend).where(
+                AdSpend.tenant_id == ctx.tenant_id,
+                AdSpend.channel == dados.channel,
+                AdSpend.year == dados.year,
+                AdSpend.month == dados.month,
+                AdSpend.scope == dados.scope,
+                AdSpend.reference == referencia,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existente is None:
+        existente = AdSpend(
+            tenant_id=ctx.tenant_id,
+            channel=dados.channel,
+            year=dados.year,
+            month=dados.month,
+            scope=dados.scope,
+            reference=referencia,
+        )
+        db.add(existente)
+        acao = "ad_spend.created"
+    else:
+        acao = "ad_spend.updated"
+
+    existente.amount = dados.amount
+    existente.attributed_revenue = dados.attributed_revenue
+    existente.notes = dados.notes
+    await db.flush()
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action=acao,
+        entity_type="ad_spend",
+        entity_id=existente.id,
+        after=dados.model_dump(mode="json"),
+    )
+    await db.commit()
+    return AdSpendOut.model_validate(existente)
+
+
+@router.delete(
+    "/ad-spend/{ad_spend_id}",
+    response_model=RespostaOperacao,
+    summary="Remove investimento em Ads",
+)
+async def remover_ad_spend(
+    ad_spend_id: int, ctx: AnalistaDep, db: DbDep
+) -> RespostaOperacao:
+    registro = (
+        await db.execute(
+            select(AdSpend).where(
+                AdSpend.tenant_id == ctx.tenant_id, AdSpend.id == ad_spend_id
+            )
+        )
+    ).scalar_one_or_none()
+    if registro is None:
+        raise NaoEncontrado("Lançamento de Ads não encontrado.")
+    await audit.registrar(
+        db,
+        tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
+        action="ad_spend.deleted",
+        entity_type="ad_spend",
+        entity_id=ad_spend_id,
+        before={"amount": str(registro.amount), "channel": registro.channel},
+    )
+    await db.delete(registro)
+    await db.commit()
+    return RespostaOperacao(mensagem="Lançamento de Ads removido.")

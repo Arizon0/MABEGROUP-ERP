@@ -406,3 +406,119 @@ export interface MediaMovel {
     media_inicial?: string
   }
 }
+
+// --- Margem por pedido --------------------------------------------------------
+
+export type RecorteMargem =
+  | 'todos'
+  | 'negativos'
+  | 'sem-custo'
+  | 'sem-comissao'
+  | 'sem-frete'
+  | 'pacotes'
+  | 'revisar'
+
+export type OrdemMargem =
+  | 'pior-margem-valor'
+  | 'pior-margem-pct'
+  | 'melhor-margem-valor'
+  | 'melhor-margem-pct'
+  | 'maior-venda'
+  | 'maior-frete'
+  | 'data'
+
+export type AlertaMargem = 'sem_sku' | 'sem_custo' | 'sem_comissao' | 'liquido_diverge'
+
+/** Um pedido com a margem real resolvida: líquido − CMV − Ads − imposto. */
+export interface PedidoMargem {
+  id: number
+  external_id: string
+  channel: string
+  date_created: string | null
+  status: string
+  titulo: string
+  skus: string[]
+  logistic_type: string
+  has_multiple_items: boolean
+  itens: number
+  total: string
+  custo: string
+  frete: string
+  comissao: string
+  liquido: string
+  net_source: string
+  ads: string
+  /** Null quando o canal não informou a receita atribuída à publicidade. */
+  acos_pct: string | null
+  tacos_pct: string | null
+  imposto: string
+  margem_valor: string
+  /** Null quando o pedido não tem receita — não existe percentual sem base. */
+  margem_pct: string | null
+  diferenca_liquido: string
+  alertas: AlertaMargem[]
+}
+
+export interface ResumoMargens {
+  pedidos: number
+  negativos: number
+  pct_negativos: string
+  para_revisar: number
+  total: string
+  custo: string
+  frete: string
+  comissao: string
+  ads: string
+  imposto: string
+  liquido: string
+  margem_valor: string
+  margem_pct: string
+  prejuizo_dos_negativos: string
+  /** Verba lançada que não achou pedido para ratear na competência. */
+  ads_nao_alocado: string
+}
+
+export interface AnaliseMargens {
+  filtros: {
+    recorte: RecorteMargem
+    ordem: OrdemMargem
+    busca: string | null
+    incluir_cancelados: boolean
+  }
+  resumo: ResumoMargens
+  contagem_por_recorte: Record<RecorteMargem, number>
+  paginacao: {
+    pagina: number
+    tamanho: number
+    total: number
+    paginas: number
+    de: number
+    ate: number
+  }
+  pedidos: PedidoMargem[]
+}
+
+export type EscopoAds = 'listing' | 'sku' | 'channel'
+
+export interface AdSpend {
+  id: number
+  channel: string
+  year: number
+  month: number
+  scope: EscopoAds
+  reference: string
+  amount: string
+  attributed_revenue: string | null
+  notes: string
+}
+
+export interface AdSpendIn {
+  channel: string
+  year: number
+  month: number
+  scope: EscopoAds
+  reference: string
+  amount: string
+  attributed_revenue?: string | null
+  notes?: string
+}

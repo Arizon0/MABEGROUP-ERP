@@ -13,6 +13,7 @@ from app.core.errors import NaoEncontrado
 from app.models.finance import Payment, Reconciliation
 from app.models.order import Order, OrderEvent, OrderItem, Shipment, ShipmentEvent
 from app.models.support import Claim, Message
+from app.services import analytics, margens
 
 router = APIRouter(prefix="/orders", tags=["Pedidos"])
 
@@ -81,6 +82,70 @@ async def listar(
         "limite": limite,
         "offset": offset,
     }
+
+
+# --- Margem por pedido -------------------------------------------------------
+# A análise venda-a-venda: margem = líquido − CMV − Ads − imposto do vendedor.
+# Fica em /orders porque a unidade é o pedido; o CRUD do investimento em Ads
+# que a alimenta fica em /costs/ad-spend, junto dos demais custos.
+
+
+
+@router.get(
+    "/margins/options",
+    summary="Recortes, ordenações e alertas aceitos pela análise de margem",
+)
+async def opcoes_de_margem(ctx: CtxDep) -> dict[str, Any]:
+    """A tela monta os chips a partir daqui — lista nova não exige deploy dela."""
+    return {
+        "recortes": list(margens.RECORTES),
+        "ordenacoes": list(margens.ORDENACOES),
+        "alertas": list(margens.ALERTAS),
+    }
+
+
+@router.get(
+    "/margins",
+    summary="Margem real de cada pedido",
+    description=(
+        "Para cada pedido: **margem = líquido − CMV − Ads − imposto do "
+        "vendedor**. Líquido, CMV e imposto (Simples progressivo, com "
+        "vigência) já vêm congelados no pedido; o investimento em Ads lançado "
+        "em `/costs/ad-spend` é rateado proporcionalmente à receita, pelo "
+        "lançamento mais específico que casar (anúncio > SKU > canal). ACOS "
+        "só existe quando o lançamento informa a receita atribuída à "
+        "publicidade; TACOS usa a receita total do pedido."
+    ),
+)
+async def margem_por_pedido(
+    ctx: CtxDep,
+    db: DbDep,
+    inicio: datetime | None = None,
+    fim: datetime | None = None,
+    channel: str | None = None,
+    recorte: str = Query(margens.RECORTE_TODOS),
+    ordem: str = Query(margens.ORDEM_DATA),
+    busca: str | None = Query(None, max_length=120),
+    pagina: int = Query(1, ge=1),
+    tamanho: int = Query(
+        margens.TAMANHO_PAGINA_PADRAO, ge=1, le=margens.TAMANHO_PAGINA_MAX
+    ),
+    incluir_cancelados: bool = Query(False),
+) -> dict[str, Any]:
+    ini, f = analytics.normalizar_periodo(inicio, fim)
+    filtro = analytics.Filtro(
+        tenant_id=ctx.tenant_id, inicio=ini, fim=f, channel=channel
+    )
+    return await margens.analisar(
+        db,
+        filtro,
+        recorte=recorte,
+        ordem=ordem,
+        busca=busca,
+        pagina=pagina,
+        tamanho=tamanho,
+        incluir_cancelados=incluir_cancelados,
+    )
 
 
 @router.get("/{order_id}", summary="Detalhe completo com timeline unificada")

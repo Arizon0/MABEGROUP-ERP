@@ -29,7 +29,7 @@ from app.models.finance import (
     Settlement,
     SettlementEntry,
 )
-from app.models.marketing import Campaign, CampaignItem
+from app.models.marketing import AdSpend, Campaign, CampaignItem
 from app.models.metrics import Alert, AlertRule, MetricDaily, MetricHourly, MetricSnapshot
 from app.models.order import Order, OrderEvent, OrderItem, Shipment, ShipmentEvent
 from app.models.support import Claim, ClaimEvent, Message, Question, Review
@@ -53,7 +53,7 @@ __all__ = [
     # Atendimento
     "Question", "Message", "Claim", "ClaimEvent", "Review",
     # Marketing
-    "Campaign", "CampaignItem",
+    "AdSpend", "Campaign", "CampaignItem",
     # Custos e impostos
     "TaxRule", "OperatingExpense", "MonthlyClose",
     # Métricas
